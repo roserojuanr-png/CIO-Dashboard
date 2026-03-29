@@ -1,0 +1,16 @@
+date,platform,metric_type,value
+2026-03-01,HCPRO,availability_percent,99.95
+2026-03-01,Orchestrate,availability_percent,99.90
+2026-03-01,Engage,availability_percent,99.83
+2026-03-01,HCPRO,sms_transactions,1090000
+2026-03-01,Orchestrate,sms_transactions,914000
+2026-03-01,Engage,sms_transactions,641000
+2026-03-01,HCPRO,voice_transactions,585000
+2026-03-01,Orchestrate,voice_transactions,304000
+2026-03-01,Engage,voice_transactions,116000
+2026-03-01,HCPRO,critical_open_vulnerabilities,0
+2026-03-01,Orchestrate,critical_open_vulnerabilities,1
+2026-03-01,Engage,critical_open_vulnerabilities,1
+2026-03-01,HCPRO,cloud_total_cost,194000
+2026-03-01,Orchestrate,cloud_total_cost,144000
+2026-03-01,Engage,cloud_total_cost,118000

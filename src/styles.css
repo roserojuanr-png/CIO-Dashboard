@@ -1,0 +1,123 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background:
+    radial-gradient(circle at 15% 10%, rgba(0, 176, 255, 0.12), transparent 20%),
+    radial-gradient(circle at 85% 0%, rgba(119, 89, 255, 0.16), transparent 22%),
+    radial-gradient(circle at 50% 100%, rgba(59, 231, 176, 0.08), transparent 26%),
+    linear-gradient(180deg, #040712 0%, #08101f 45%, #04070f 100%);
+  color: #e4ecff;
+  overflow-x: hidden;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 96px 96px;
+  mask-image: linear-gradient(180deg, rgba(255, 255, 255, 0.55), transparent 90%);
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(115deg, transparent 15%, rgba(255,255,255,0.035) 28%, transparent 40%),
+    radial-gradient(circle at 50% 0%, rgba(0,176,255,0.06), transparent 35%);
+  mix-blend-mode: screen;
+  opacity: 0.8;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.panel-shell {
+  position: relative;
+  overflow: hidden;
+}
+
+.panel-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(0,176,255,0.35), rgba(255,255,255,0.05), rgba(182,125,255,0.28));
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.panel-shell::after {
+  content: "";
+  position: absolute;
+  top: -20%;
+  left: -40%;
+  width: 40%;
+  height: 160%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.09), transparent);
+  transform: rotate(18deg);
+  animation: scan 9s linear infinite;
+  pointer-events: none;
+  opacity: 0.45;
+}
+
+.hero-grid {
+  background-image:
+    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 72px 72px;
+}
+
+.cinematic-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(70px);
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+@media print {
+  body::before {
+    display: none;
+  }
+
+  body::after,
+  .panel-shell::before,
+  .panel-shell::after {
+    display: none;
+  }
+
+  .shadow-glow,
+  .shadow-neon,
+  .shadow-portal {
+    box-shadow: none !important;
+  }
+}
