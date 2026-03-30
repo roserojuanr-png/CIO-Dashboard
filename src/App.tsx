@@ -812,13 +812,31 @@ function ImplementationPage({
     .map(([name, value]) => ({ name, value }))
     .sort((a, b) => b.value - a.value);
 
-  const goLiveRevenueTotal = records.reduce((acc, record) => {
-    if (!record.actual_go_live_date || record.revenue === null) {
+  const realizedRevenueSinceQ4 = records.reduce((acc, record) => {
+    if (!isAtOrAfterQuarter(record.sold_quarter, "2025-Q4")) {
       return acc;
     }
-
-    return acc + calculateRevenueGenerated(record.revenue, record.actual_go_live_date);
+    return acc + (record.cumulative_revenue ?? 0);
   }, 0);
+
+  const topRevenueCustomers = Array.from(
+    records.reduce((acc, record) => {
+      if (!isAtOrAfterQuarter(record.sold_quarter, "2025-Q4") || record.cumulative_revenue === null) {
+        return acc;
+      }
+      const key = (record.account_name || record.client_name || record.implementation_id).trim();
+      const existing = acc.get(key) ?? { customer: key, total: 0, latestQuarter: "" };
+      existing.total += record.cumulative_revenue;
+      if (record.sold_quarter && record.sold_quarter > existing.latestQuarter) {
+        existing.latestQuarter = record.sold_quarter;
+      }
+      acc.set(key, existing);
+      return acc;
+    }, new Map<string, { customer: string; total: number; latestQuarter: string }>()),
+  )
+    .map(([, value]) => value)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 5);
 
   return (
     <>
@@ -933,46 +951,33 @@ function ImplementationPage({
         </div>
 
         <SectionCard
-          title="Revenue Generated From Go-Lives"
-          subtitle="Revenue value divided by 12 and multiplied by elapsed months since Actual Go-Live."
+          title="Total Realized Revenue Since Q4"
+          subtitle="Summatory of Column N `CUMMULATIVE_REVENUE` from the Implementations tab (2025-Q4 onward)."
           className="h-full"
         >
           <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
             <div className="rounded-[2rem] border border-hcpro/20 bg-[linear-gradient(180deg,rgba(11,18,36,0.82),rgba(8,16,22,0.94))] p-6">
-              <p className="text-xs uppercase tracking-[0.25em] text-hcpro">Go-Live Revenue</p>
-              <p className="mt-4 font-display text-5xl font-bold tracking-tight text-white">
-                {formatCompactCurrency(goLiveRevenueTotal)}
+              <p className="text-xs uppercase tracking-[0.25em] text-hcpro">Realized Revenue Since Q4</p>
+              <p className="mt-4 font-display text-5xl font-bold tracking-tight text-sky-300">
+                {formatCompactCurrency(realizedRevenueSinceQ4)}
               </p>
               <p className="mt-3 text-sm text-muted">
-                Active only when `Actual_Golive` has a value. Blank live dates contribute zero.
+                Computed as the sum of `CUMMULATIVE_REVENUE` (Column N) from sold quarter 2025-Q4 and after.
               </p>
             </div>
 
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {records
-                .filter((record) => record.actual_go_live_date && record.revenue !== null)
-                .sort(
-                  (a, b) =>
-                    calculateRevenueGenerated(b.revenue ?? 0, b.actual_go_live_date) -
-                    calculateRevenueGenerated(a.revenue ?? 0, a.actual_go_live_date),
-                )
-                .slice(0, 6)
-                .map((record) => {
-                  const generated = calculateRevenueGenerated(record.revenue ?? 0, record.actual_go_live_date);
-                  return (
-                    <div key={`${record.implementation_id}-golive-revenue`} className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-medium text-white">
-                            {record.account_name || record.client_name || record.implementation_id}
-                          </p>
-                          <p className="text-xs text-muted">{record.actual_go_live_date}</p>
-                        </div>
-                        <p className="text-sm font-semibold text-hcpro">{formatCurrency(generated)}</p>
-                      </div>
+              {topRevenueCustomers.map((customer) => (
+                <div key={`${customer.customer}-cumulative-revenue`} className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-white">{customer.customer}</p>
+                      <p className="text-xs text-muted">{customer.latestQuarter || "2025-Q4+"}</p>
                     </div>
-                  );
-                })}
+                    <p className="text-sm font-semibold text-hcpro">{formatCurrency(customer.total)}</p>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </SectionCard>
@@ -1543,24 +1548,25 @@ function parseTimelineDate(value: string): number | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
 }
 
-function calculateRevenueGenerated(revenue: number, actualGoLiveDate: string): number {
-  const liveDate = parseTimelineDate(actualGoLiveDate);
-  if (liveDate === null) {
-    return 0;
+function isAtOrAfterQuarter(inputQuarter: string, baselineQuarter: string): boolean {
+  const parseQuarter = (value: string): { year: number; quarter: number } | null => {
+    const match = value.trim().toUpperCase().match(/(\d{4})\s*[-/]?\s*Q([1-4])/);
+    if (!match) {
+      return null;
+    }
+    return { year: Number(match[1]), quarter: Number(match[2]) };
+  };
+
+  const input = parseQuarter(inputQuarter);
+  const baseline = parseQuarter(baselineQuarter);
+  if (!input || !baseline) {
+    return true;
   }
 
-  const now = new Date();
-  const live = new Date(liveDate);
-  let months =
-    (now.getFullYear() - live.getFullYear()) * 12 +
-    (now.getMonth() - live.getMonth()) +
-    1;
-
-  if (months < 0) {
-    months = 0;
+  if (input.year !== baseline.year) {
+    return input.year > baseline.year;
   }
-
-  return (revenue / 12) * months;
+  return input.quarter >= baseline.quarter;
 }
 
 function PortalGlyph({

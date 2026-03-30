@@ -70,6 +70,7 @@ export interface ImplementationRecord {
   risk_reason: string;
   sold_quarter: string;
   revenue: number | null;
+  cumulative_revenue: number | null;
   closed_date: string;
   contract_signed_date: string;
   planned_go_live_date: string;

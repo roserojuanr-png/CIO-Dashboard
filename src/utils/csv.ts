@@ -51,6 +51,7 @@ const IMPLEMENTATION_FIELDS = [
   "risk_reason",
   "sold_quarter",
   "revenue",
+  "cumulative_revenue",
   "closed_date",
   "contract_signed_date",
   "planned_go_live_date",
@@ -73,6 +74,14 @@ const IMPLEMENTATION_FIELD_ALIASES: Record<(typeof IMPLEMENTATION_FIELDS)[number
   risk_reason: ["risk_reason", "issue_reason", "risk_notes"],
   sold_quarter: ["sold_quarter", "quarter", "sold_qtr"],
   revenue: ["revenue", "arr", "value", "booking_value"],
+  cumulative_revenue: [
+    "cumulative_revenue",
+    "cummulative_revenue",
+    "cumulative_revenue_since_q4",
+    "cummulative_revenue_since_q4",
+    "column_n",
+    "col_n",
+  ],
   closed_date: ["closed_date", "closed", "close_date"],
   contract_signed_date: ["contract_signed_date", "contract_date", "signed_date"],
   planned_go_live_date: ["planned_go_live_date", "planned_golive_date", "planned_golive", "planned_go_live", "go_live_date"],
@@ -144,8 +153,32 @@ function parseNumber(value: unknown): number | null {
     return null;
   }
 
-  const parsed = Number(String(value).replace(/[$,%\s,]/g, ""));
-  return Number.isFinite(parsed) ? parsed : null;
+  const raw = String(value).trim();
+  if (!raw) {
+    return null;
+  }
+
+  const normalized = raw
+    .replace(/[$,%\s,]/g, "")
+    .replace(/[−–—]/g, "-")
+    .toUpperCase();
+
+  let multiplier = 1;
+  let numericText = normalized;
+
+  if (normalized.endsWith("K")) {
+    multiplier = 1_000;
+    numericText = normalized.slice(0, -1);
+  } else if (normalized.endsWith("M")) {
+    multiplier = 1_000_000;
+    numericText = normalized.slice(0, -1);
+  } else if (normalized.endsWith("B")) {
+    multiplier = 1_000_000_000;
+    numericText = normalized.slice(0, -1);
+  }
+
+  const parsed = Number(numericText);
+  return Number.isFinite(parsed) ? parsed * multiplier : null;
 }
 
 function normalizeDateText(value: unknown): string {
@@ -299,6 +332,7 @@ function parseImplementationRow(row: RawRow, source: string, sourceSheet: string
     risk_reason: mapped.risk_reason,
     sold_quarter: mapped.sold_quarter,
     revenue: parseNumber(mapped.revenue),
+    cumulative_revenue: parseNumber(mapped.cumulative_revenue),
     closed_date: mapped.closed_date,
     contract_signed_date: mapped.contract_signed_date,
     planned_go_live_date: mapped.planned_go_live_date,
