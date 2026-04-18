@@ -1,4 +1,4 @@
-export type Platform = "HCPRO" | "Orchestrate" | "Engage";
+export type Platform = "HCPRO" | "Orchestrate" | "Engage" | "Odeza" | "Heritage";
 
 export type MetricKey =
   | "availability_percent"
@@ -66,6 +66,7 @@ export interface ImplementationRecord {
   owner: string;
   opportunity_owner: string;
   status: string;
+  status_dashboard: string;
   risk_level: string;
   risk_reason: string;
   sold_quarter: string;
@@ -78,6 +79,7 @@ export interface ImplementationRecord {
   revenue_start_date: string;
   not_live_reason: string;
   customer_scope_sign_off: string;
+  exclude_marker: string;
   source?: string;
   sourceSheet?: string;
 }
@@ -86,6 +88,8 @@ export interface ParseResult {
   records: DashboardRecord[];
   implementationRecords: ImplementationRecord[];
   productRecords: ProductRecord[];
+  aiRecords: AIRecord[];
+  aiGuidanceRecords: AIGuidanceRecord[];
   issues: UploadIssue[];
   sources: string[];
 }
@@ -97,6 +101,24 @@ export interface ProductRecord {
   status: string;
   date: string;
   status_color: string;
+  source?: string;
+  sourceSheet?: string;
+}
+
+export interface AIRecord {
+  date: string;
+  ai_tool: string;
+  users: number | null;
+  adoption: number | null;
+  source?: string;
+  sourceSheet?: string;
+}
+
+export interface AIGuidanceRecord {
+  department: string;
+  ai_tool: string;
+  primary_users: string;
+  rationale: string;
   source?: string;
   sourceSheet?: string;
 }

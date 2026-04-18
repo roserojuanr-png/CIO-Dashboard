@@ -6,12 +6,14 @@ import {
   formatPercent,
 } from "@/utils/formatters";
 
-export const PLATFORM_ORDER: Platform[] = ["HCPRO", "Orchestrate", "Engage"];
+export const PLATFORM_ORDER: Platform[] = ["HCPRO", "Orchestrate", "Engage", "Odeza", "Heritage"];
 
 export const PLATFORM_COLORS: Record<Platform, string> = {
   HCPRO: "#3be7b0",
   Orchestrate: "#41b6ff",
   Engage: "#b67dff",
+  Odeza: "#f59e0b",
+  Heritage: "#f97316",
 };
 
 export const METRIC_LABELS: Record<MetricKey, string> = {
@@ -45,6 +47,12 @@ export function clampPlatform(value: string | null | undefined): Platform | null
   }
   if (normalized === "engage") {
     return "Engage";
+  }
+  if (normalized === "odeza") {
+    return "Odeza";
+  }
+  if (normalized === "heritage") {
+    return "Heritage";
   }
 
   return null;

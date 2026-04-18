@@ -1,6 +1,8 @@
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import type {
+  AIGuidanceRecord,
+  AIRecord,
   DashboardRecord,
   ImplementationRecord,
   MetricKey,
@@ -12,6 +14,10 @@ import type {
 import { aggregateMonthly, clampPlatform, getMonthKey } from "@/utils/dashboardData";
 
 type RawRow = Record<string, string | number | null | undefined>;
+type HeaderDetection = {
+  rows: RawRow[];
+  headerRowIndex: number;
+} | null;
 
 const FIELD_ALIASES: Record<string, string[]> = {
   date: ["date", "month", "period", "month_date", "month_start"],
@@ -47,6 +53,7 @@ const IMPLEMENTATION_FIELDS = [
   "owner",
   "opportunity_owner",
   "status",
+  "status_dashboard",
   "risk_level",
   "risk_reason",
   "sold_quarter",
@@ -59,6 +66,7 @@ const IMPLEMENTATION_FIELDS = [
   "revenue_start_date",
   "not_live_reason",
   "customer_scope_sign_off",
+  "exclude_marker",
 ] as const;
 
 const IMPLEMENTATION_FIELD_ALIASES: Record<(typeof IMPLEMENTATION_FIELDS)[number], string[]> = {
@@ -70,6 +78,7 @@ const IMPLEMENTATION_FIELD_ALIASES: Record<(typeof IMPLEMENTATION_FIELDS)[number
   owner: ["owner", "opportunity_owner", "implementation_owner", "project_owner"],
   opportunity_owner: ["opportunity_owner", "owner", "implementation_owner", "project_owner"],
   status: ["status"],
+  status_dashboard: ["status_dashboard", "status_dashboard_", "status_dashboard__"],
   risk_level: ["risk_level", "risk", "risk_status"],
   risk_reason: ["risk_reason", "issue_reason", "risk_notes"],
   sold_quarter: ["sold_quarter", "quarter", "sold_qtr"],
@@ -79,8 +88,6 @@ const IMPLEMENTATION_FIELD_ALIASES: Record<(typeof IMPLEMENTATION_FIELDS)[number
     "cummulative_revenue",
     "cumulative_revenue_since_q4",
     "cummulative_revenue_since_q4",
-    "column_n",
-    "col_n",
   ],
   closed_date: ["closed_date", "closed", "close_date"],
   contract_signed_date: ["contract_signed_date", "contract_date", "signed_date"],
@@ -89,6 +96,7 @@ const IMPLEMENTATION_FIELD_ALIASES: Record<(typeof IMPLEMENTATION_FIELDS)[number
   revenue_start_date: ["revenue_start_date", "revenue_date"],
   not_live_reason: ["not_live_reason", "reason_not_live"],
   customer_scope_sign_off: ["customer_scope_sign_off", "scope_sign_off", "customer_sign_off", "customer_scope_signoff"],
+  exclude_marker: ["exclude", "excluded", "exclude_flag"],
 };
 
 const PRODUCT_FIELDS = [
@@ -107,6 +115,34 @@ const PRODUCT_FIELD_ALIASES: Record<(typeof PRODUCT_FIELDS)[number], string[]> =
   status: ["status"],
   date: ["date", "ga_date", "go_live_date"],
   status_color: ["status_color", "color", "status_colour"],
+};
+
+const AI_FIELDS = [
+  "date",
+  "ai_tool",
+  "users",
+  "adoption",
+] as const;
+
+const AI_GUIDANCE_FIELDS = [
+  "department",
+  "ai_tool",
+  "primary_users",
+  "rationale",
+] as const;
+
+const AI_FIELD_ALIASES: Record<(typeof AI_FIELDS)[number], string[]> = {
+  date: ["date", "month", "period"],
+  ai_tool: ["ai_tool", "tool", "ai_tool_name"],
+  users: ["users", "licenses", "licences", "seats"],
+  adoption: ["adoption", "adoption_rate", "usage_rate"],
+};
+
+const AI_GUIDANCE_FIELD_ALIASES: Record<(typeof AI_GUIDANCE_FIELDS)[number], string[]> = {
+  department: ["department", "team", "function"],
+  ai_tool: ["ai_tool", "tool", "ai_tool_name"],
+  primary_users: ["primary_users", "users", "recommended_users"],
+  rationale: ["rationale", "reason", "guidance", "use_case"],
 };
 
 const METRIC_TYPE_ALIASES: Record<string, MetricKey> = {
@@ -133,19 +169,127 @@ function normalizeKey(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
 }
 
+function buildRowsFromHeaderMatrix(matrix: unknown[][], headerRowIndex: number): RawRow[] {
+  const headerRow = matrix[headerRowIndex] ?? [];
+  const headerCounts = new Map<string, number>();
+  const normalizedHeaders = headerRow.map((cell, index) => {
+    const rawHeader = String(cell ?? "").trim();
+    const baseHeader = rawHeader || `__empty_${index}`;
+    const count = headerCounts.get(baseHeader) ?? 0;
+    headerCounts.set(baseHeader, count + 1);
+    return count === 0 ? baseHeader : `${baseHeader}__${count + 1}`;
+  });
+
+  return matrix
+    .slice(headerRowIndex + 1)
+    .map((row) => {
+      const record: RawRow = {};
+      normalizedHeaders.forEach((header, index) => {
+        const cell = row[index];
+        record[header] =
+          cell === null || cell === undefined || typeof cell === "string" || typeof cell === "number"
+            ? (cell ?? "")
+            : String(cell);
+      });
+      return record;
+    })
+    .filter((row) => Object.values(row).some((value) => String(value ?? "").trim() !== ""));
+}
+
+function getHeaderLookupKey(key: string): string {
+  return normalizeKey(key.replace(/__\d+$/, ""));
+}
+
+function scoreHeaderCandidate(headers: string[]): number {
+  const row = Object.fromEntries(headers.map((header) => [header, "sample"])) as RawRow;
+
+  const implementationMatches = IMPLEMENTATION_FIELDS.filter((field) => findImplementationField(row, field)).length;
+  const productMatches = PRODUCT_FIELDS.filter((field) => findProductField(row, field)).length;
+  const aiMatches = AI_FIELDS.filter((field) => findAIField(row, field)).length;
+  const aiGuidanceMatches = AI_GUIDANCE_FIELDS.filter((field) => findAIGuidanceField(row, field)).length;
+  const dashboardMatches = [
+    "date",
+    "platform",
+    "metric_type",
+    "value",
+    "availability_percent",
+    "sms_transactions",
+    "voice_transactions",
+    "critical_open_vulnerabilities",
+    "cloud_total_cost",
+  ].filter((field) => findField(row, field as keyof typeof FIELD_ALIASES)).length;
+
+  return Math.max(implementationMatches, productMatches, aiMatches, aiGuidanceMatches, dashboardMatches);
+}
+
+function detectWorkbookHeaderRows(matrix: unknown[][]): HeaderDetection {
+  const scanLimit = Math.min(matrix.length, 20);
+  let bestIndex = -1;
+  let bestScore = 0;
+
+  for (let index = 0; index < scanLimit; index += 1) {
+    const row = matrix[index] ?? [];
+    const headers = row.map((cell) => normalizeKey(String(cell ?? "")));
+    const nonEmptyHeaders = headers.filter(Boolean);
+    if (!nonEmptyHeaders.length) {
+      continue;
+    }
+
+    const score = scoreHeaderCandidate(nonEmptyHeaders);
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = index;
+    }
+  }
+
+  if (bestIndex === -1 || bestScore < 2) {
+    return null;
+  }
+
+  return {
+    rows: buildRowsFromHeaderMatrix(matrix, bestIndex),
+    headerRowIndex: bestIndex,
+  };
+}
+
 function findField(row: RawRow, target: keyof typeof FIELD_ALIASES): string | undefined {
   const keys = Object.keys(row);
-  return keys.find((key) => FIELD_ALIASES[target].includes(normalizeKey(key)));
+  return keys.find((key) => FIELD_ALIASES[target].includes(getHeaderLookupKey(key)));
 }
 
 function findImplementationField(row: RawRow, target: (typeof IMPLEMENTATION_FIELDS)[number]): string | undefined {
   const keys = Object.keys(row);
-  return keys.find((key) => IMPLEMENTATION_FIELD_ALIASES[target].includes(normalizeKey(key)));
+
+  if (target === "status") {
+    const exactStatusKey = keys.find((key) => key.replace(/__\d+$/, "").trim() === "STATUS");
+    if (exactStatusKey) {
+      return exactStatusKey;
+    }
+  }
+
+  if (target === "status_dashboard") {
+    const exactDashboardStatusKey = keys.find((key) => key.replace(/__\d+$/, "").trim() === "STATUS-DASHBOARD");
+    if (exactDashboardStatusKey) {
+      return exactDashboardStatusKey;
+    }
+  }
+
+  return keys.find((key) => IMPLEMENTATION_FIELD_ALIASES[target].includes(getHeaderLookupKey(key)));
 }
 
 function findProductField(row: RawRow, target: (typeof PRODUCT_FIELDS)[number]): string | undefined {
   const keys = Object.keys(row);
-  return keys.find((key) => PRODUCT_FIELD_ALIASES[target].includes(normalizeKey(key)));
+  return keys.find((key) => PRODUCT_FIELD_ALIASES[target].includes(getHeaderLookupKey(key)));
+}
+
+function findAIField(row: RawRow, target: (typeof AI_FIELDS)[number]): string | undefined {
+  const keys = Object.keys(row);
+  return keys.find((key) => AI_FIELD_ALIASES[target].includes(getHeaderLookupKey(key)));
+}
+
+function findAIGuidanceField(row: RawRow, target: (typeof AI_GUIDANCE_FIELDS)[number]): string | undefined {
+  const keys = Object.keys(row);
+  return keys.find((key) => AI_GUIDANCE_FIELD_ALIASES[target].includes(getHeaderLookupKey(key)));
 }
 
 function parseNumber(value: unknown): number | null {
@@ -328,6 +472,7 @@ function parseImplementationRow(row: RawRow, source: string, sourceSheet: string
     owner: mapped.owner || mapped.opportunity_owner,
     opportunity_owner: mapped.opportunity_owner || mapped.owner,
     status: mapped.status,
+    status_dashboard: mapped.status_dashboard,
     risk_level: mapped.risk_level,
     risk_reason: mapped.risk_reason,
     sold_quarter: mapped.sold_quarter,
@@ -340,6 +485,7 @@ function parseImplementationRow(row: RawRow, source: string, sourceSheet: string
     revenue_start_date: mapped.revenue_start_date,
     not_live_reason: mapped.not_live_reason,
     customer_scope_sign_off: mapped.customer_scope_sign_off,
+    exclude_marker: mapped.exclude_marker,
     source,
     sourceSheet,
   };
@@ -375,6 +521,61 @@ function parseProductRow(row: RawRow, source: string, sourceSheet: string): Prod
   };
 }
 
+function parseAIRow(row: RawRow, source: string, sourceSheet: string): AIRecord | null {
+  const dateField = findAIField(row, "date");
+  const toolField = findAIField(row, "ai_tool");
+  const usersField = findAIField(row, "users");
+  const adoptionField = findAIField(row, "adoption");
+
+  if (!dateField || !toolField) {
+    return null;
+  }
+
+  const date = normalizeDateText(row[dateField]);
+  const aiTool = String(row[toolField] ?? "").trim();
+  if (!date || !aiTool) {
+    return null;
+  }
+
+  return {
+    date,
+    ai_tool: aiTool,
+    users: usersField ? parseNumber(row[usersField]) : null,
+    adoption: adoptionField ? parseNumber(row[adoptionField]) : null,
+    source,
+    sourceSheet,
+  };
+}
+
+function parseAIGuidanceRow(row: RawRow, source: string, sourceSheet: string): AIGuidanceRecord | null {
+  const departmentField = findAIGuidanceField(row, "department");
+  const toolField = findAIGuidanceField(row, "ai_tool");
+  const usersField = findAIGuidanceField(row, "primary_users");
+  const rationaleField = findAIGuidanceField(row, "rationale");
+
+  if (!departmentField || !toolField || !usersField || !rationaleField) {
+    return null;
+  }
+
+  const department = String(row[departmentField] ?? "").trim();
+  const aiTool = String(row[toolField] ?? "").trim();
+  const primaryUsers = String(row[usersField] ?? "").trim();
+  const rationale = String(row[rationaleField] ?? "").trim();
+
+  if (!department || !aiTool || !primaryUsers || !rationale) {
+    return null;
+  }
+
+  return {
+    department,
+    ai_tool: aiTool,
+    primary_users: primaryUsers,
+    rationale,
+    source,
+    sourceSheet,
+  };
+}
+
 function isImplementationSheet(rows: RawRow[]): boolean {
   if (!rows.length) {
     return false;
@@ -393,11 +594,29 @@ function isProductSheet(rows: RawRow[]): boolean {
   return matchCount >= 4;
 }
 
+function isAISheet(rows: RawRow[]): boolean {
+  if (!rows.length) {
+    return false;
+  }
+
+  const matchCount = AI_FIELDS.filter((field) => findAIField(rows[0], field)).length;
+  return matchCount >= 3;
+}
+
+function isAIGuidanceSheet(rows: RawRow[]): boolean {
+  if (!rows.length) {
+    return false;
+  }
+
+  const matchCount = AI_GUIDANCE_FIELDS.filter((field) => findAIGuidanceField(rows[0], field)).length;
+  return matchCount >= 4;
+}
+
 function parseRows(rows: RawRow[], source: string, sourceSheet = "Sheet1"): ParseResult {
   const issues: UploadIssue[] = [];
   if (!rows.length) {
     issues.push({ fileName: source, level: "warning", message: `${sourceSheet}: no data rows found.` });
-    return { records: [], implementationRecords: [], productRecords: [], issues, sources: [source] };
+    return { records: [], implementationRecords: [], productRecords: [], aiRecords: [], aiGuidanceRecords: [], issues, sources: [source] };
   }
 
   if (isImplementationSheet(rows)) {
@@ -414,7 +633,7 @@ function parseRows(rows: RawRow[], source: string, sourceSheet = "Sheet1"): Pars
       });
     }
 
-    return { records: [], implementationRecords, productRecords: [], issues, sources: [source] };
+    return { records: [], implementationRecords, productRecords: [], aiRecords: [], aiGuidanceRecords: [], issues, sources: [source] };
   }
 
   if (isProductSheet(rows)) {
@@ -431,7 +650,41 @@ function parseRows(rows: RawRow[], source: string, sourceSheet = "Sheet1"): Pars
       });
     }
 
-    return { records: [], implementationRecords: [], productRecords, issues, sources: [source] };
+    return { records: [], implementationRecords: [], productRecords, aiRecords: [], aiGuidanceRecords: [], issues, sources: [source] };
+  }
+
+  if (isAISheet(rows)) {
+    const aiRecords = rows
+      .map((row) => parseAIRow(row, source, sourceSheet))
+      .filter((record): record is AIRecord => Boolean(record));
+
+    const malformedRows = rows.length - aiRecords.length;
+    if (malformedRows > 0) {
+      issues.push({
+        fileName: source,
+        level: "warning",
+        message: `${sourceSheet}: ${malformedRows} AI row(s) were skipped due to missing date or tool values.`,
+      });
+    }
+
+    return { records: [], implementationRecords: [], productRecords: [], aiRecords, aiGuidanceRecords: [], issues, sources: [source] };
+  }
+
+  if (isAIGuidanceSheet(rows)) {
+    const aiGuidanceRecords = rows
+      .map((row) => parseAIGuidanceRow(row, source, sourceSheet))
+      .filter((record): record is AIGuidanceRecord => Boolean(record));
+
+    const malformedRows = rows.length - aiGuidanceRecords.length;
+    if (malformedRows > 0) {
+      issues.push({
+        fileName: source,
+        level: "warning",
+        message: `${sourceSheet}: ${malformedRows} AI guidance row(s) were skipped due to missing department, tool, users, or rationale values.`,
+      });
+    }
+
+    return { records: [], implementationRecords: [], productRecords: [], aiRecords: [], aiGuidanceRecords, issues, sources: [source] };
   }
 
   const firstRow = rows[0];
@@ -446,7 +699,7 @@ function parseRows(rows: RawRow[], source: string, sourceSheet = "Sheet1"): Pars
       level: "error",
       message: `${sourceSheet}: missing required column(s): ${missingFields.join(", ")}.`,
     });
-    return { records: [], implementationRecords: [], productRecords: [], issues, sources: [source] };
+    return { records: [], implementationRecords: [], productRecords: [], aiRecords: [], aiGuidanceRecords: [], issues, sources: [source] };
   }
 
   const records = rows
@@ -462,7 +715,7 @@ function parseRows(rows: RawRow[], source: string, sourceSheet = "Sheet1"): Pars
     });
   }
 
-  return { records, implementationRecords: [], productRecords: [], issues, sources: [source] };
+  return { records, implementationRecords: [], productRecords: [], aiRecords: [], aiGuidanceRecords: [], issues, sources: [source] };
 }
 
 function parseCsvText(text: string): RawRow[] {
@@ -483,6 +736,8 @@ async function parseCsvFile(file: File): Promise<ParseResult> {
       records: [],
       implementationRecords: [],
       productRecords: [],
+      aiRecords: [],
+      aiGuidanceRecords: [],
       issues: [{ fileName: file.name, level: "warning", message: "File is empty and was skipped." }],
       sources: [file.name],
     };
@@ -496,20 +751,43 @@ async function parseWorkbookFile(file: File): Promise<ParseResult> {
   const records: DashboardRecord[] = [];
   const implementationRecords: ImplementationRecord[] = [];
   const productRecords: ProductRecord[] = [];
+  const aiRecords: AIRecord[] = [];
+  const aiGuidanceRecords: AIGuidanceRecord[] = [];
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+  const normalizedSheetNames = new Map(
+    workbook.SheetNames.map((sheetName) => [sheetName, normalizeKey(sheetName)]),
+  );
+  const hasCanonicalImplementationSheet = Array.from(normalizedSheetNames.values()).includes("implementations");
 
   for (const sheetName of workbook.SheetNames) {
+    const normalizedSheetName = normalizedSheetNames.get(sheetName) ?? normalizeKey(sheetName);
+    if (
+      hasCanonicalImplementationSheet &&
+      normalizedSheetName !== "implementations" &&
+      normalizedSheetName.includes("imp")
+    ) {
+      continue;
+    }
+
     const sheet = workbook.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json<RawRow>(sheet, {
+    const matrix = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
       defval: "",
       raw: false,
-    });
+    }) as unknown[][];
+    const detected = detectWorkbookHeaderRows(matrix);
 
-    const parsed = parseRows(rows, file.name, sheetName);
+    if (!detected) {
+      continue;
+    }
+
+    const parsed = parseRows(detected.rows, file.name, sheetName);
     records.push(...parsed.records);
     implementationRecords.push(...parsed.implementationRecords);
     productRecords.push(...parsed.productRecords);
+    aiRecords.push(...parsed.aiRecords);
+    aiGuidanceRecords.push(...parsed.aiGuidanceRecords);
     issues.push(...parsed.issues);
   }
 
@@ -517,7 +795,7 @@ async function parseWorkbookFile(file: File): Promise<ParseResult> {
     issues.push({ fileName: file.name, level: "warning", message: "Workbook contains no sheets." });
   }
 
-  return { records, implementationRecords, productRecords, issues, sources: [file.name] };
+  return { records, implementationRecords, productRecords, aiRecords, aiGuidanceRecords, issues, sources: [file.name] };
 }
 
 export async function parseDataFiles(files: File[]): Promise<ParseResult> {
@@ -535,9 +813,11 @@ export async function parseDataFiles(files: File[]): Promise<ParseResult> {
   const records = aggregateMonthly(results.flatMap((result) => result.records));
   const implementationRecords = results.flatMap((result) => result.implementationRecords);
   const productRecords = results.flatMap((result) => result.productRecords);
+  const aiRecords = results.flatMap((result) => result.aiRecords);
+  const aiGuidanceRecords = results.flatMap((result) => result.aiGuidanceRecords);
   const sources = Array.from(new Set(results.flatMap((result) => result.sources)));
 
-  return { records, implementationRecords, productRecords, issues, sources };
+  return { records, implementationRecords, productRecords, aiRecords, aiGuidanceRecords, issues, sources };
 }
 
 export function exportRecordsAsCsv(records: DashboardRecord[]): void {

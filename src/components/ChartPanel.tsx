@@ -1,7 +1,6 @@
 import {
   Bar,
   CartesianGrid,
-  Cell,
   ComposedChart,
   Legend,
   Line,
@@ -167,21 +166,7 @@ export function ChartPanel({
                   fill={stroke}
                   radius={[10, 10, 0, 0]}
                   fillOpacity={opacity}
-                >
-                  {riskMode
-                    ? data.map((entry, index) => {
-                        const current = Number(entry[platform] ?? 0);
-                        const fill = current === 0 ? "#3be7b0" : current <= 2 ? "#fbbf24" : "#ff5f78";
-                        return (
-                          <Cell
-                            key={`${platform}-${String(entry.month)}-${index}`}
-                            fill={fill}
-                            fillOpacity={opacity}
-                          />
-                        );
-                      })
-                    : null}
-                </Bar>
+                />
               );
             }
 

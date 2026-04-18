@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import type { TooltipProps } from "recharts";
 import {
   AlertTriangle,
   BadgeDollarSign,
@@ -17,7 +18,10 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
   Legend,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -25,6 +29,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import type { NameType, ValueType } from "recharts/types/component/DefaultTooltipContent";
 import { FilterPanel } from "@/components/FilterPanel";
 import { ChartPanel } from "@/components/ChartPanel";
 import { KpiCard } from "@/components/KpiCard";
@@ -32,8 +37,9 @@ import { SectionCard } from "@/components/SectionCard";
 import { UploadDropzone } from "@/components/UploadDropzone";
 import { WestCxLogo } from "@/components/WestCxLogo";
 import { mockRecords } from "@/data/mockData";
-import { mockImplementationRecords, mockProductRecords } from "@/data/mockPortalData";
 import type {
+  AIGuidanceRecord,
+  AIRecord,
   DashboardRecord,
   FilterState,
   ImplementationFilterState,
@@ -57,7 +63,17 @@ import {
 import { exportRecordsAsCsv, exportTableAsCsv, parseDataFiles } from "@/utils/csv";
 import { formatCompactCurrency, formatCompactNumber, formatCurrency } from "@/utils/formatters";
 
-type PageKey = "home" | "command" | "implementation" | "product";
+type PageKey = "home" | "command" | "implementation" | "product" | "ai" | "ora";
+type PersistedUploadState = {
+  records: DashboardRecord[];
+  implementationRecords: ImplementationRecord[];
+  productRecords: ProductRecord[];
+  aiRecords: AIRecord[];
+  aiGuidanceRecords: AIGuidanceRecord[];
+  issues: UploadIssue[];
+  sources: string[];
+  lastRefreshIso: string;
+};
 
 const ALL_METRICS: MetricKey[] = [
   "availability_percent",
@@ -68,6 +84,7 @@ const ALL_METRICS: MetricKey[] = [
 ];
 
 const CHART_COLORS = ["#00B0FF", "#22c55e", "#a855f7", "#f59e0b", "#ef4444"];
+const PERSISTED_UPLOAD_KEY = "westcx-dashboard:last-upload";
 
 function buildInitialFilters(records: DashboardRecord[]): FilterState {
   const months = getAvailableMonths(records);
@@ -99,22 +116,68 @@ function normalizeBusinessUnit(record: ImplementationRecord): string {
   return record.pod || "Unassigned";
 }
 
+function isExcludedImplementation(record: ImplementationRecord): boolean {
+  const value = String(record.exclude_marker ?? "").trim().toLowerCase();
+  return value === "exclude" || value === "yes" || value === "y" || value === "true";
+}
+
+function readPersistedUploadState(): PersistedUploadState | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(PERSISTED_UPLOAD_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    return JSON.parse(raw) as PersistedUploadState;
+  } catch {
+    return null;
+  }
+}
+
+function persistUploadState(state: PersistedUploadState): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(PERSISTED_UPLOAD_KEY, JSON.stringify(state));
+}
+
 export default function App() {
   const initialRecords = aggregateMonthly(mockRecords);
-  const [records, setRecords] = useState<DashboardRecord[]>(initialRecords);
-  const [implementationRecords, setImplementationRecords] = useState<ImplementationRecord[]>(mockImplementationRecords);
-  const [productRecords, setProductRecords] = useState<ProductRecord[]>(mockProductRecords);
-  const [filters, setFilters] = useState<FilterState>(() => buildInitialFilters(initialRecords));
+  const persistedUpload = readPersistedUploadState();
+  const seededRecords = persistedUpload?.records.length ? persistedUpload.records : initialRecords;
+  const [records, setRecords] = useState<DashboardRecord[]>(seededRecords);
+  const [implementationRecords, setImplementationRecords] = useState<ImplementationRecord[]>(
+    () => persistedUpload?.implementationRecords ?? [],
+  );
+  const [productRecords, setProductRecords] = useState<ProductRecord[]>(
+    () => persistedUpload?.productRecords ?? [],
+  );
+  const [aiRecords, setAIRecords] = useState<AIRecord[]>(
+    () => persistedUpload?.aiRecords ?? [],
+  );
+  const [aiGuidanceRecords, setAIGuidanceRecords] = useState<AIGuidanceRecord[]>(
+    () => persistedUpload?.aiGuidanceRecords ?? [],
+  );
+  const [filters, setFilters] = useState<FilterState>(() => buildInitialFilters(seededRecords));
   const [implementationFilters, setImplementationFilters] = useState<ImplementationFilterState>(emptyImplementationFilters);
   const [productFilters, setProductFilters] = useState<ProductFilterState>(emptyProductFilters);
-  const [issues, setIssues] = useState<UploadIssue[]>([]);
+  const [issues, setIssues] = useState<UploadIssue[]>(() => persistedUpload?.issues ?? []);
   const [loading, setLoading] = useState(false);
   const [availabilityView, setAvailabilityView] = useState<"line" | "bar">("line");
   const [voiceView, setVoiceView] = useState<"bar" | "composed">("composed");
   const [activePage, setActivePage] = useState<PageKey>("home");
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
-  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
-  const [sourceNames, setSourceNames] = useState<string[]>(["WestCX_Main_Data.xlsx"]);
+  const [lastRefresh, setLastRefresh] = useState<Date>(
+    () => (persistedUpload?.lastRefreshIso ? new Date(persistedUpload.lastRefreshIso) : new Date()),
+  );
+  const [sourceNames, setSourceNames] = useState<string[]>(
+    () => persistedUpload?.sources.length ? persistedUpload.sources : ["WestCX_Main_Data.xlsx"],
+  );
   const [searchQuery, setSearchQuery] = useState("");
 
   const availableMonths = useMemo(() => getAvailableMonths(records), [records]);
@@ -148,15 +211,18 @@ export default function App() {
 
   const filteredImplementationRecords = useMemo(() => {
     return implementationRecords.filter((record) => {
+      if (isExcludedImplementation(record)) {
+        return false;
+      }
       const businessUnit = normalizeBusinessUnit(record);
       const inBusinessUnit =
         implementationFilters.businessUnit === "All" || businessUnit === implementationFilters.businessUnit;
       const inOwner = implementationFilters.owner === "All" || record.owner === implementationFilters.owner;
       const inStatus =
         implementationFilters.statuses.length === 0 || implementationFilters.statuses.includes(record.status);
-      const closedDate = record.closed_date;
-      const meetsStart = !implementationFilters.startDate || Boolean(closedDate && closedDate >= implementationFilters.startDate);
-      const meetsEnd = !implementationFilters.endDate || Boolean(closedDate && closedDate <= implementationFilters.endDate);
+      const goLiveDate = record.actual_go_live_date;
+      const meetsStart = !implementationFilters.startDate || Boolean(goLiveDate && goLiveDate >= implementationFilters.startDate);
+      const meetsEnd = !implementationFilters.endDate || Boolean(goLiveDate && goLiveDate <= implementationFilters.endDate);
       const inDate = meetsStart && meetsEnd;
       const inSearch =
         !searchQuery ||
@@ -219,6 +285,24 @@ export default function App() {
     return { launched, pipeline, targetUnderThirtyDays };
   }, [filteredProductRecords]);
 
+  const aiStats = useMemo(() => {
+    const uniqueTools = new Set(aiRecords.map((record) => record.ai_tool).filter(Boolean));
+    const latestDate = aiRecords.map((record) => record.date).filter(Boolean).sort((a, b) => a.localeCompare(b)).at(-1) ?? "";
+    const latestLicenses = aiRecords
+      .filter((record) => record.date === latestDate)
+      .reduce((acc, record) => acc + (record.users ?? 0), 0);
+    const adoptionValues = aiRecords.map((record) => record.adoption).filter((value): value is number => value !== null);
+    const averageAdoption = adoptionValues.length
+      ? Math.round(adoptionValues.reduce((acc, value) => acc + value, 0) / adoptionValues.length)
+      : 0;
+
+    return {
+      uniqueTools: uniqueTools.size,
+      latestLicenses,
+      averageAdoption,
+    };
+  }, [aiRecords]);
+
   const searchResults = useMemo(() => {
     if (!searchQuery.trim()) {
       return [];
@@ -228,6 +312,8 @@ export default function App() {
       { label: "Command Center", page: "command" as PageKey, hint: "Availability, transactions, security, cost" },
       { label: "CIO Implementations View", page: "implementation" as PageKey, hint: "Delivery portfolio execution" },
       { label: "Product Commercialization Dashboard", page: "product" as PageKey, hint: "Commercial pipeline and launch status" },
+      { label: "AI Adoption", page: "ai" as PageKey, hint: "Licenses and adoption by AI tool" },
+      { label: "Orchestrate ORA", page: "ora" as PageKey, hint: "Embedded Orchestrate ORA workspace" },
       ...filteredImplementationRecords.slice(0, 3).map((record) => ({
         label: `${record.client_name} • ${record.product_name}`,
         page: "implementation" as PageKey,
@@ -238,12 +324,17 @@ export default function App() {
         page: "product" as PageKey,
         hint: `${record.business_unit} • ${record.status}`,
       })),
+      ...aiRecords.slice(0, 3).map((record) => ({
+        label: record.ai_tool,
+        page: "ai" as PageKey,
+        hint: `${record.date} • ${record.users ?? 0} licenses`,
+      })),
     ];
 
     return results.filter((item) =>
       `${item.label} ${item.hint}`.toLowerCase().includes(searchQuery.toLowerCase()),
     );
-  }, [filteredImplementationRecords, filteredProductRecords, searchQuery]);
+  }, [aiRecords, filteredImplementationRecords, filteredProductRecords, searchQuery]);
 
   useEffect(() => {
     if (!uploadedFiles.length) {
@@ -259,13 +350,28 @@ export default function App() {
 
   async function applyParsedData(files: File[]) {
     const parsed = await parseDataFiles(files);
-    setRecords(parsed.records.length ? parsed.records : []);
-    setFilters(buildInitialFilters(parsed.records));
+    const nextRecords = parsed.records.length ? parsed.records : [];
+    const nextRefresh = new Date();
+
+    setRecords(nextRecords);
+    setFilters(buildInitialFilters(nextRecords));
     setImplementationRecords(parsed.implementationRecords);
     setProductRecords(parsed.productRecords);
+    setAIRecords(parsed.aiRecords);
+    setAIGuidanceRecords(parsed.aiGuidanceRecords);
     setSourceNames(parsed.sources.length ? parsed.sources : ["WestCX_Main_Data.xlsx"]);
     setIssues(parsed.issues);
-    setLastRefresh(new Date());
+    setLastRefresh(nextRefresh);
+    persistUploadState({
+      records: nextRecords,
+      implementationRecords: parsed.implementationRecords,
+      productRecords: parsed.productRecords,
+      aiRecords: parsed.aiRecords,
+      aiGuidanceRecords: parsed.aiGuidanceRecords,
+      issues: parsed.issues,
+      sources: parsed.sources.length ? parsed.sources : ["WestCX_Main_Data.xlsx"],
+      lastRefreshIso: nextRefresh.toISOString(),
+    });
   }
 
   async function handleFilesSelected(files: File[]) {
@@ -313,6 +419,8 @@ export default function App() {
       command: "Command Center",
       implementation: "CIO Implementations View",
       product: "Product Commercialization Dashboard",
+      ai: "AI Adoption",
+      ora: "Orchestrate ORA",
     };
     return `Home → ${names[activePage]}`;
   }, [activePage]);
@@ -379,6 +487,20 @@ export default function App() {
               </section>
             ) : null}
 
+                {activePage === "ai" ? (
+                  <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    <KpiCard label="AI Tools" value={String(aiStats.uniqueTools)} accent="orchestrate" />
+                    <KpiCard label="Latest Licenses" value={String(aiStats.latestLicenses)} accent="hcpro" />
+                    <KpiCard label="Avg Adoption" value={`${aiStats.averageAdoption}%`} accent="engage" />
+                  </section>
+                ) : null}
+
+            {activePage === "ora" ? (
+              <main className="space-y-6">
+                <OraPage onBackHome={() => setActivePage("home")} />
+              </main>
+            ) : null}
+
             {activePage === "implementation" ? (
               <main className="space-y-6">
                 <ImplementationPage
@@ -391,7 +513,7 @@ export default function App() {
                   uploadNode={<UploadDropzone loading={loading} onFilesSelected={handleFilesSelected} />}
                 />
               </main>
-            ) : (
+            ) : activePage === "ora" ? null : (
               <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
                 <div className="space-y-6">
                   {activePage === "command" ? (
@@ -448,6 +570,13 @@ export default function App() {
                 ) : null}
 
                 {activePage === "product" ? <ProductPage records={filteredProductRecords} onBackHome={() => setActivePage("home")} /> : null}
+                {activePage === "ai" ? (
+                  <AIAdoptionPage
+                    records={aiRecords}
+                    guidanceRecords={aiGuidanceRecords}
+                    onBackHome={() => setActivePage("home")}
+                  />
+                ) : null}
                 </main>
               </div>
             )}
@@ -499,7 +628,7 @@ function TopNav({
           <input
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search across Command Center, Implementations, and Product dashboards"
+            placeholder="Search across Command Center, Implementations, Product, and AI dashboards"
             className="w-full rounded-full border border-white/10 bg-white/[0.05] py-3 pl-11 pr-4 text-sm text-white outline-none focus:border-[#00B0FF]/40"
           />
           {searchQuery && searchResults.length ? (
@@ -563,11 +692,11 @@ function HomePage({
           Strategic operating portal for command, delivery, and commercialization visibility.
         </h1>
         <p className="mt-4 max-w-3xl text-base text-[#a7b8d8]">
-          Navigate between the live CIO command center, implementation execution portfolio, and product commercialization console while keeping a single connected workbook source of truth.
+          Navigate between the live CIO command center, implementation execution portfolio, product commercialization console, and AI adoption dashboard while keeping a single connected workbook source of truth.
         </p>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-3">
+      <section className="grid gap-6 lg:grid-cols-2 2xl:grid-cols-4">
         <PortalCard
           title="Command Center"
           description="Availability, cost, transactions, security posture, and executive operational KPIs."
@@ -589,13 +718,27 @@ function HomePage({
           onClick={() => onNavigate("product")}
           icon={<PortalGlyph tone="purple" kind="product" />}
         />
+        <PortalCard
+          title="AI Adoption"
+          description="Licenses and adoption trends by AI tool from the AI Masters tab."
+          accent="from-[#f59e0b]/25 to-[#f59e0b]/5"
+          onClick={() => onNavigate("ai")}
+          icon={<PortalGlyph tone="amber" kind="ai" />}
+        />
+        <PortalCard
+          title="Orchestrate ORA"
+          description="Embedded access to the Orchestrate ORA experience with one-click return to the executive portal."
+          accent="from-[#38bdf8]/25 to-[#38bdf8]/5"
+          onClick={() => onNavigate("ora")}
+          icon={<PortalGlyph tone="blue" kind="ora" />}
+        />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
         <UploadDropzone loading={loading} onFilesSelected={onFilesSelected} />
         <SectionCard
           title="Portal Controls"
-          subtitle="Use a single Excel workbook or CSV set to populate all three dashboards."
+          subtitle="Use a single Excel workbook or CSV set to populate all four dashboards."
           action={
             <button
               type="button"
@@ -780,11 +923,10 @@ function ImplementationPage({
     }, new Map<string, number>()),
   ).map(([name, value]) => ({ name, value }));
 
+  const delayedRecords = records.filter((record) => record.status.trim().toUpperCase() === "DELAYED");
+
   const delayedReasonDistribution = Array.from(
-    records.reduce((acc, record) => {
-      if (record.status.trim().toUpperCase() !== "DELAYED") {
-        return acc;
-      }
+    delayedRecords.reduce((acc, record) => {
       const key = record.not_live_reason?.trim();
       if (!key) {
         return acc;
@@ -852,7 +994,15 @@ function ImplementationPage({
               <div className="aspect-square w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={statusDistribution} dataKey="value" nameKey="name" innerRadius={82} outerRadius={122}>
+                    <Pie
+                      data={statusDistribution}
+                      dataKey="value"
+                      nameKey="name"
+                      innerRadius={82}
+                      outerRadius={122}
+                      label={renderPieCountLabel}
+                      labelLine={false}
+                    >
                       {statusDistribution.map((entry, index) => (
                         <Cell key={entry.name} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                       ))}
@@ -877,19 +1027,27 @@ function ImplementationPage({
 
           <SectionCard
             title="Delayed Status Reason"
-            subtitle="Breakdown of No Live Reason values from delayed implementations."
+            subtitle="Count of `not_live_reason` values for rows marked `DELAYED` in the `STATUS` column."
             className="h-full"
           >
             <div className="mx-auto flex max-w-[360px] flex-col items-center">
               <div className="aspect-square w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={delayedReasonDistribution} dataKey="value" nameKey="name" innerRadius={82} outerRadius={122}>
+                    <Pie
+                      data={delayedReasonDistribution}
+                      dataKey="value"
+                      nameKey="name"
+                      innerRadius={82}
+                      outerRadius={122}
+                      label={renderPieCountLabel}
+                      labelLine={false}
+                    >
                       {delayedReasonDistribution.map((entry, index) => (
                         <Cell key={entry.name} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip />
+                    <Tooltip formatter={(value: number) => [`${value}`, "Delayed rows"]} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -909,19 +1067,27 @@ function ImplementationPage({
 
           <SectionCard
             title="Delayed Reason By POD"
-            subtitle="Share of delayed implementations by POD, using delayed rows and POD values from column G."
+            subtitle="Share of delayed implementations by POD, using the `POD` header from the IMPLEMENTATIONS tab."
             className="h-full"
           >
             <div className="mx-auto flex max-w-[360px] flex-col items-center">
               <div className="aspect-square w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={delayedPodDistribution} dataKey="value" nameKey="name" innerRadius={82} outerRadius={122}>
+                    <Pie
+                      data={delayedPodDistribution}
+                      dataKey="value"
+                      nameKey="name"
+                      innerRadius={82}
+                      outerRadius={122}
+                      label={renderPieCountLabel}
+                      labelLine={false}
+                    >
                       {delayedPodDistribution.map((entry, index) => (
                         <Cell key={entry.name} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip />
+                    <Tooltip formatter={(value: number) => [`${value}`, "Delayed rows"]} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -952,7 +1118,7 @@ function ImplementationPage({
 
         <SectionCard
           title="Total Realized Revenue Since Q4"
-          subtitle="Summatory of Column N `CUMMULATIVE_REVENUE` from the Implementations tab (2025-Q4 onward)."
+          subtitle="Summatory of `CUMMULATIVE_REVENUE` from the IMPLEMENTATIONS tab, identified by header name (2025-Q4 onward)."
           className="h-full"
         >
           <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
@@ -962,7 +1128,7 @@ function ImplementationPage({
                 {formatCompactCurrency(realizedRevenueSinceQ4)}
               </p>
               <p className="mt-3 text-sm text-muted">
-                Computed as the sum of `CUMMULATIVE_REVENUE` (Column N) from sold quarter 2025-Q4 and after.
+                Computed as the sum of the `CUMMULATIVE_REVENUE` header for records sold in 2025-Q4 and after.
               </p>
             </div>
 
@@ -1176,6 +1342,260 @@ function ProductPage({
   );
 }
 
+function AIAdoptionPage({
+  records,
+  guidanceRecords,
+  onBackHome,
+}: {
+  records: AIRecord[];
+  guidanceRecords: AIGuidanceRecord[];
+  onBackHome: () => void;
+}) {
+  const toolColors = ["#41b6ff", "#3be7b0", "#f59e0b", "#b67dff", "#f97316", "#f43f5e", "#22c55e"];
+  const tools = Array.from(new Set(records.map((record) => record.ai_tool).filter(Boolean))).sort();
+  const dates = Array.from(new Set(records.map((record) => record.date).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+
+  const licenseSeries = dates.map((date) => {
+    const row: Record<string, string | number | null> = { date };
+    let totalLicenses = 0;
+    tools.forEach((tool) => {
+      const match = records.find((record) => record.date === date && record.ai_tool === tool);
+      const users = match?.users ?? null;
+      row[tool] = users;
+      totalLicenses += users ?? 0;
+    });
+    row.total_licenses = totalLicenses;
+    return row;
+  });
+
+  const adoptionSeries = dates.map((date) => {
+    const row: Record<string, string | number | null> = { date };
+    tools.forEach((tool) => {
+      const match = records.find((record) => record.date === date && record.ai_tool === tool);
+      row[tool] = match?.adoption ?? null;
+    });
+    return row;
+  });
+
+  const latestByTool = tools.map((tool) => {
+    const toolRows = records.filter((record) => record.ai_tool === tool).sort((a, b) => a.date.localeCompare(b.date));
+    const latest = toolRows.at(-1);
+    return {
+      tool,
+      users: latest?.users ?? 0,
+      adoption: latest?.adoption ?? 0,
+      date: latest?.date ?? "N/A",
+    };
+  }).sort((a, b) => b.users - a.users || a.tool.localeCompare(b.tool));
+
+  return (
+    <>
+      <PageTopActions onBackHome={onBackHome} />
+      <SectionCard
+        title="AI Adoption Dashboard"
+        subtitle="Licenses and adoption trends by AI tool from the `AI Masters` tab."
+      >
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+          {latestByTool.map((item, index) => (
+            <div key={item.tool} className="rounded-3xl border border-white/10 bg-white/[0.04] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-muted">{item.tool}</p>
+                  <p className="mt-3 font-display text-3xl font-semibold text-white">{item.users}</p>
+                  <p className="text-sm text-muted">Latest licenses</p>
+                </div>
+                <div className="rounded-full px-3 py-1 text-sm text-white" style={{ backgroundColor: `${toolColors[index % toolColors.length]}33` }}>
+                  {Math.round(item.adoption)}%
+                </div>
+              </div>
+              <p className="mt-3 text-xs text-muted">Snapshot: {item.date}</p>
+            </div>
+          ))}
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Licenses per Tool"
+        subtitle="Monthly license volume by AI tool, shown as bars with matching trend lines."
+      >
+        <div className="h-[360px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={licenseSeries} margin={{ top: 12, right: 10, left: 0, bottom: 0 }}>
+              <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="date" tick={{ fill: "#8ba0c7", fontSize: 12 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: "#8ba0c7", fontSize: 12 }} axisLine={false} tickLine={false} />
+              <Tooltip
+                shared={false}
+                content={<LicenseTooltip />}
+              />
+              <Legend />
+              {tools.map((tool, index) => (
+                <Bar
+                  key={`${tool}-bar`}
+                  dataKey={tool}
+                  fill={toolColors[index % toolColors.length]}
+                  fillOpacity={0.28}
+                  stroke={toolColors[index % toolColors.length]}
+                  strokeWidth={1.6}
+                  radius={[10, 10, 0, 0]}
+                  maxBarSize={28}
+                />
+              ))}
+              {tools.map((tool, index) => (
+                <Line
+                  key={`${tool}-line`}
+                  type="monotone"
+                  dataKey={tool}
+                  stroke={toolColors[index % toolColors.length]}
+                  strokeWidth={3}
+                  dot={{ r: 3, fill: toolColors[index % toolColors.length], strokeWidth: 0 }}
+                  activeDot={{ r: 5 }}
+                />
+              ))}
+              <Line
+                type="monotone"
+                dataKey="total_licenses"
+                name="Total"
+                stroke="#ffffff"
+                strokeWidth={5}
+                dot={false}
+                activeDot={{ r: 6, fill: "#ffffff", stroke: "#0f172a", strokeWidth: 2 }}
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Adoption per Tool"
+        subtitle="Active usage rate by AI tool over time."
+      >
+        <div className="h-[360px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={adoptionSeries} margin={{ top: 12, right: 10, left: 0, bottom: 0 }}>
+              <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="date" tick={{ fill: "#8ba0c7", fontSize: 12 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: "#8ba0c7", fontSize: 12 }} axisLine={false} tickLine={false} tickFormatter={(value) => `${value}%`} />
+              <Tooltip formatter={(value: number) => [`${value}%`, "Adoption"]} />
+              <Legend />
+              {tools.map((tool, index) => (
+                <Line
+                  key={tool}
+                  type="monotone"
+                  dataKey={tool}
+                  stroke={toolColors[index % toolColors.length]}
+                  strokeWidth={3}
+                  dot={{ r: 2 }}
+                  activeDot={{ r: 5 }}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="AI Guidance Matrix"
+        subtitle="Recommended tool placement by department from the `AI Guidance` tab."
+      >
+        <div className="overflow-hidden rounded-[1.85rem] border border-white/10 bg-[linear-gradient(180deg,rgba(10,18,32,0.94),rgba(13,20,36,0.88))] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+          <div className="border-b border-white/8 bg-[linear-gradient(90deg,rgba(65,182,255,0.10),rgba(182,125,255,0.10),rgba(59,231,176,0.08))] px-5 py-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="rounded-full border border-[#41b6ff]/30 bg-[#41b6ff]/10 px-3 py-1 text-xs uppercase tracking-[0.2em] text-[#8fd6ff]">
+                Guidance
+              </span>
+              <span className="text-sm text-muted">
+                Department-to-tool recommendations and rationale for AI operating standards.
+              </span>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="min-w-full border-separate border-spacing-0">
+              <thead>
+                <tr>
+                  <th className="sticky top-0 bg-[#0f1728] px-5 py-4 text-left text-xs uppercase tracking-[0.22em] text-[#8fd6ff]">
+                    Department
+                  </th>
+                  <th className="sticky top-0 bg-[#0f1728] px-5 py-4 text-left text-xs uppercase tracking-[0.22em] text-[#8fd6ff]">
+                    AI Tool
+                  </th>
+                  <th className="sticky top-0 bg-[#0f1728] px-5 py-4 text-left text-xs uppercase tracking-[0.22em] text-[#8fd6ff]">
+                    Primary Users
+                  </th>
+                  <th className="sticky top-0 bg-[#0f1728] px-5 py-4 text-left text-xs uppercase tracking-[0.22em] text-[#8fd6ff]">
+                    Rationale
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {guidanceRecords.map((record, index) => (
+                  <tr
+                    key={`${record.department}-${record.ai_tool}-${index}`}
+                    className="group transition hover:bg-white/[0.04]"
+                  >
+                    <td className="border-t border-white/8 px-5 py-4 align-top">
+                      <div className="inline-flex rounded-full border border-[#41b6ff]/25 bg-[#41b6ff]/10 px-3 py-1 text-sm font-medium text-white shadow-[0_0_20px_rgba(65,182,255,0.08)]">
+                        {record.department}
+                      </div>
+                    </td>
+                    <td className="border-t border-white/8 px-5 py-4 align-top">
+                      <div className="inline-flex rounded-full border border-[#b67dff]/25 bg-[#b67dff]/10 px-3 py-1 text-sm font-medium text-white shadow-[0_0_20px_rgba(182,125,255,0.08)]">
+                        {record.ai_tool}
+                      </div>
+                    </td>
+                    <td className="border-t border-white/8 px-5 py-4 align-top text-sm leading-6 text-[#d8e6ff]">
+                      {record.primary_users}
+                    </td>
+                    <td className="border-t border-white/8 px-5 py-4 align-top text-sm leading-6 text-muted">
+                      {record.rationale}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </SectionCard>
+    </>
+  );
+}
+
+function OraPage({ onBackHome }: { onBackHome: () => void }) {
+  return (
+    <>
+      <PageTopActions onBackHome={onBackHome} />
+      <SectionCard
+        title="Orchestrate ORA"
+        subtitle="Embedded Orchestrate ORA workspace with media permissions enabled for microphone and audio playback. If the site blocks iframe media access, use the direct open link below."
+        action={
+          <a
+            href="https://westcx-website.myhousecallspro.com/"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 rounded-full border border-[#38bdf8]/30 bg-[#38bdf8]/10 px-4 py-2 text-sm text-white"
+          >
+            Open In New Tab
+          </a>
+        }
+      >
+        <div className="overflow-hidden rounded-[1.9rem] border border-white/10 bg-[#0b1220]">
+          <iframe
+            src="https://westcx-website.myhousecallspro.com/"
+            title="Orchestrate ORA"
+            allow="microphone; autoplay; speaker-selection; clipboard-read; clipboard-write"
+            referrerPolicy="strict-origin-when-cross-origin"
+            className="h-[78vh] min-h-[720px] w-full bg-white"
+          />
+        </div>
+        <p className="mt-3 text-sm text-muted">
+          If microphone access still does not prompt inside the embedded experience, open ORA in a new tab. Browser iframe policies and the remote site&apos;s security headers can override embedded media access.
+        </p>
+      </SectionCard>
+    </>
+  );
+}
+
 function DataSourceBadge({ sourceNames, lastRefresh }: { sourceNames: string[]; lastRefresh: Date }) {
   return (
     <div className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2">
@@ -1236,7 +1656,15 @@ function ImplementationFiltersPanel({
         <FilterSelect label="POD" value={filters.businessUnit} options={["All", ...businessUnits]} onChange={(value) => onChange({ ...filters, businessUnit: value })} />
         <FilterSelect label="Owner" value={filters.owner} options={["All", ...owners]} onChange={(value) => onChange({ ...filters, owner: value })} />
         <FilterSelect label="Status" value={filters.statuses[0] ?? "All"} options={["All", ...statuses]} onChange={(value) => onChange({ ...filters, statuses: value === "All" ? [] : [value] })} />
-        <DateRangeFields startDate={filters.startDate} endDate={filters.endDate} onStartChange={(value) => onChange({ ...filters, startDate: value })} onEndChange={(value) => onChange({ ...filters, endDate: value })} />
+        <DateRangeFields
+          startDate={filters.startDate}
+          endDate={filters.endDate}
+          startLabel="Go-Live Start Date"
+          endLabel="Go-Live End Date"
+          helperText="Filters implementations by the `Actual_Golive` header date range."
+          onStartChange={(value) => onChange({ ...filters, startDate: value })}
+          onEndChange={(value) => onChange({ ...filters, endDate: value })}
+        />
         <ResetButton onClick={onReset} />
       </div>
     </aside>
@@ -1298,24 +1726,33 @@ function FilterSelect({
 function DateRangeFields({
   startDate,
   endDate,
+  startLabel = "Start Date",
+  endLabel = "End Date",
+  helperText,
   onStartChange,
   onEndChange,
 }: {
   startDate: string;
   endDate: string;
+  startLabel?: string;
+  endLabel?: string;
+  helperText?: string;
   onStartChange: (value: string) => void;
   onEndChange: (value: string) => void;
 }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className="space-y-2">
+      {helperText ? <p className="text-xs text-muted">{helperText}</p> : null}
+      <div className="grid gap-3 sm:grid-cols-2">
       <label className="space-y-2 text-sm">
-        <span className="text-muted">Start Date</span>
+        <span className="text-muted">{startLabel}</span>
         <input type="date" value={startDate} onChange={(event) => onStartChange(event.target.value)} className="w-full rounded-2xl border border-white/10 bg-panelSoft px-4 py-3 text-white outline-none" />
       </label>
       <label className="space-y-2 text-sm">
-        <span className="text-muted">End Date</span>
+        <span className="text-muted">{endLabel}</span>
         <input type="date" value={endDate} onChange={(event) => onEndChange(event.target.value)} className="w-full rounded-2xl border border-white/10 bg-panelSoft px-4 py-3 text-white outline-none" />
       </label>
+      </div>
     </div>
   );
 }
@@ -1376,6 +1813,89 @@ function InsightCard({ icon, label, value }: { icon: ReactNode; label: string; v
       <div className="mb-3 inline-flex rounded-2xl border border-white/10 bg-white/[0.04] p-3">{icon}</div>
       <p className="text-sm text-muted">{label}</p>
       <p className="mt-2 font-display text-2xl font-semibold text-white">{value}</p>
+    </div>
+  );
+}
+
+function renderPieCountLabel({
+  cx,
+  cy,
+  midAngle,
+  innerRadius,
+  outerRadius,
+  value,
+}: {
+  cx?: number;
+  cy?: number;
+  midAngle?: number;
+  innerRadius?: number;
+  outerRadius?: number;
+  value?: number;
+}) {
+  if (
+    cx === undefined ||
+    cy === undefined ||
+    midAngle === undefined ||
+    innerRadius === undefined ||
+    outerRadius === undefined ||
+    value === undefined ||
+    value <= 0
+  ) {
+    return null;
+  }
+
+  const radius = innerRadius + (outerRadius - innerRadius) * 0.52;
+  const x = cx + radius * Math.cos((-midAngle * Math.PI) / 180);
+  const y = cy + radius * Math.sin((-midAngle * Math.PI) / 180);
+
+  return (
+    <text
+      x={x}
+      y={y}
+      fill="#f8fafc"
+      fontSize="18"
+      fontWeight="700"
+      textAnchor="middle"
+      dominantBaseline="central"
+    >
+      {value}
+    </text>
+  );
+}
+
+function LicenseTooltip({ active, payload, label }: TooltipProps<ValueType, NameType>) {
+  if (!active || !payload?.length) {
+    return null;
+  }
+
+  const uniqueEntries = Array.from(
+    payload.reduce((acc, entry) => {
+      const key = String(entry.dataKey ?? entry.name ?? "");
+      if (!key || acc.has(key)) {
+        return acc;
+      }
+      acc.set(key, entry);
+      return acc;
+    }, new Map<string, (typeof payload)[number]>()),
+  ).map(([, entry]) => entry);
+  const totalEntry = uniqueEntries.find((entry) => String(entry.dataKey ?? "") === "total_licenses");
+  const toolEntries = uniqueEntries.filter((entry) => String(entry.dataKey ?? "") !== "total_licenses");
+
+  return (
+    <div className="min-w-[220px] rounded-2xl border border-white/10 bg-[#f8fafc] px-4 py-3 shadow-2xl">
+      <p className="mb-3 text-base font-medium text-slate-300">{label}</p>
+      {totalEntry ? (
+        <div className="mb-4 rounded-xl bg-slate-900 px-3 py-2 text-[17px] font-semibold text-white">
+          Total Licenses: {formatCompactNumber(Number(totalEntry.value ?? 0))}
+        </div>
+      ) : null}
+      <div className="space-y-2">
+        {toolEntries.map((entry) => (
+          <div key={String(entry.dataKey ?? entry.name)} className="text-[15px] font-medium" style={{ color: entry.color ?? "#0f172a" }}>
+            {String(entry.name)} Licenses: {formatCompactNumber(Number(entry.value ?? 0))}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1573,8 +2093,8 @@ function PortalGlyph({
   tone,
   kind,
 }: {
-  tone: "blue" | "green" | "purple";
-  kind: "command" | "implementation" | "product";
+  tone: "blue" | "green" | "purple" | "amber";
+  kind: "command" | "implementation" | "product" | "ai" | "ora";
 }) {
   const toneClasses = {
     blue: {
@@ -1598,6 +2118,13 @@ function PortalGlyph({
       text: "text-engage",
       soft: "bg-engage/10",
     },
+    amber: {
+      shell: "from-[#f59e0b]/30 via-[#f59e0b]/10 to-white/[0.03]",
+      border: "border-[#f59e0b]/25",
+      glow: "shadow-[0_0_45px_rgba(245,158,11,0.2)]",
+      text: "text-[#fbbf24]",
+      soft: "bg-[#f59e0b]/10",
+    },
   }[tone];
 
   return (
@@ -1608,6 +2135,8 @@ function PortalGlyph({
         {kind === "command" ? <CommandGlyph /> : null}
         {kind === "implementation" ? <ImplementationGlyph /> : null}
         {kind === "product" ? <ProductGlyph /> : null}
+        {kind === "ai" ? <AIGlyph /> : null}
+        {kind === "ora" ? <OraGlyph /> : null}
       </div>
     </div>
   );
@@ -1636,6 +2165,32 @@ function ImplementationGlyph() {
       <div className="absolute right-0 top-2 h-8 w-2 rounded-full bg-current/20" />
       <div className="absolute right-1 top-0 h-3 w-6 rounded-full border border-current/60 bg-current/10" />
       <div className="absolute bottom-1 right-1 h-2.5 w-2.5 rounded-full bg-current shadow-[0_0_14px_currentColor]" />
+    </div>
+  );
+}
+
+function AIGlyph() {
+  return (
+    <div className="relative h-12 w-12">
+      <div className="absolute left-3 top-3 h-6 w-6 rounded-xl border-2 border-current bg-current/10" />
+      <div className="absolute right-2 top-1 h-4 w-6 rounded-full border-2 border-current/80" />
+      <div className="absolute bottom-2 right-2 h-2.5 w-2.5 rounded-full bg-current" />
+      <div className="absolute bottom-4 left-6 h-2 w-8 rounded-full bg-current/70" />
+      <div className="absolute left-7 top-8 h-7 w-[2px] bg-current/70" />
+      <div className="absolute left-5 top-6 h-1.5 w-5 rounded-full bg-current" />
+    </div>
+  );
+}
+
+function OraGlyph() {
+  return (
+    <div className="relative h-12 w-12">
+      <div className="absolute inset-1 rounded-2xl border border-current/25 bg-current/10" />
+      <div className="absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-current/80" />
+      <div className="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
+      <div className="absolute left-1 top-1/2 h-[2px] w-10 -translate-y-1/2 bg-current/70" />
+      <div className="absolute left-1/2 top-1 h-10 w-[2px] -translate-x-1/2 bg-current/70" />
+      <div className="absolute right-1 top-1 h-2.5 w-2.5 rounded-full border border-current bg-current/15" />
     </div>
   );
 }
