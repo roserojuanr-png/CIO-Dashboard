@@ -90,6 +90,7 @@ export interface ParseResult {
   productRecords: ProductRecord[];
   aiRecords: AIRecord[];
   aiGuidanceRecords: AIGuidanceRecord[];
+  cloudSpendRecords: CloudSpendRecord[];
   issues: UploadIssue[];
   sources: string[];
 }
@@ -119,6 +120,16 @@ export interface AIGuidanceRecord {
   ai_tool: string;
   primary_users: string;
   rationale: string;
+  source?: string;
+  sourceSheet?: string;
+}
+
+export interface CloudSpendRecord {
+  provider: string;
+  service: string;
+  date: string;
+  month: string;
+  cost: number;
   source?: string;
   sourceSheet?: string;
 }

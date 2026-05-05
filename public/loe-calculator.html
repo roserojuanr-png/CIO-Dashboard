@@ -1,0 +1,2053 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Orchestrate implementation — LOE calculator | WestCX</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+<style>
+  :root {
+    /* WestCX brand palette — per Brand Identity Guidelines (Dec 2025) */
+    --indigo: #192477;        /* WestCX Indigo (primary) */
+    --indigo-mid: #475092;    /* tone */
+    --indigo-soft: #757CAD;   /* tone */
+    --indigo-pale: #D1D3E5;   /* tone */
+    --green: #6CCF6E;         /* WestCX Green (primary) */
+    --green-dark: #3B723D;    /* WestCX Evergreen */
+    --green-mid: #4DBC4F;     /* tone */
+    --mint: #A8F78D;          /* WestCX Mint */
+    --green-pale: #D4EED1;    /* tone */
+    --periwinkle: #B191E1;    /* WestCX Periwinkle */
+    --offwhite: #F4F2F1;      /* WestCX Off-White */
+    --white: #FFFFFF;
+    --black: #000000;
+    /* Functional */
+    --bg: #F4F2F1;
+    --card: #FFFFFF;
+    --border: #E2E4ED;
+    --text: #1F2147;
+    --body: #34395E;
+    --muted: #6B7196;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  h1, h2, h3, .serif {
+    font-family: Georgia, 'Times New Roman', serif;
+    letter-spacing: -0.01em;
+  }
+
+  /* Topbar */
+  .topbar {
+    background: var(--white);
+    color: var(--indigo);
+    padding: 16px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+  .brand .logo {
+    width: 130px;
+    height: auto;
+    display: block;
+  }
+  .brand .pipe {
+    width: 1px;
+    height: 38px;
+    background: var(--indigo-pale);
+  }
+  .brand .titles h1 {
+    font-size: 18px;
+    margin: 0;
+    color: var(--indigo);
+    font-weight: 600;
+  }
+  .brand .titles .sub {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    margin-top: 2px;
+  }
+  .topbar .meta {
+    font-size: 11px;
+    letter-spacing: 3px;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+
+  /* Layout */
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(360px, 1fr);
+    gap: 28px;
+    padding: 28px 32px 60px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  /* Card */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 22px 24px;
+    margin-bottom: 18px;
+    box-shadow: 0 1px 2px rgba(25, 36, 119, 0.04);
+  }
+  .card h2 {
+    font-size: 11px;
+    color: var(--green-dark);
+    letter-spacing: 4px;
+    margin: 0 0 6px;
+    font-weight: 700;
+    text-transform: uppercase;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  }
+  .card .card-title {
+    font-size: 22px;
+    color: var(--indigo);
+    font-weight: 700;
+    margin: 0 0 16px;
+  }
+  .card .card-help {
+    font-size: 12px;
+    color: var(--muted);
+    margin: -10px 0 16px;
+  }
+
+  /* Form */
+  .field-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px 18px;
+  }
+  .field {
+    display: flex;
+    flex-direction: column;
+  }
+  .field.full { grid-column: 1 / -1; }
+  label.field-label {
+    font-size: 11px;
+    color: var(--muted);
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  input[type="text"], input[type="date"], input[type="number"], select, textarea {
+    padding: 9px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--text);
+    background: var(--white);
+    transition: border-color 0.15s;
+  }
+  input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--green);
+    box-shadow: 0 0 0 3px rgba(108, 207, 110, 0.25);
+  }
+
+  /* Tier picker */
+  .tier-picker {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 10px;
+  }
+  .tier-option {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    cursor: pointer;
+    transition: all 0.15s;
+    background: var(--white);
+    position: relative;
+  }
+  .tier-option:hover { border-color: var(--green); }
+  .tier-option input { display: none; }
+  .tier-option.selected {
+    border-color: var(--green);
+    background: var(--green-pale);
+    box-shadow: 0 0 0 1px var(--green) inset;
+  }
+  .tier-option .tier-name {
+    font-weight: 700;
+    color: var(--indigo);
+    font-size: 14px;
+    margin-bottom: 2px;
+    font-family: Georgia, 'Times New Roman', serif;
+  }
+  .tier-option .tier-dur {
+    font-size: 12px;
+    color: var(--green-dark);
+    font-weight: 600;
+  }
+  .tier-option .tier-meta {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 4px;
+    line-height: 1.4;
+  }
+
+  /* Checkbox grid */
+  .check-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 18px;
+  }
+  .check {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .check:hover { background: var(--offwhite); }
+  .check input[type="checkbox"] {
+    margin-top: 2px;
+    accent-color: var(--green);
+    width: 16px; height: 16px;
+  }
+  .check .label {
+    flex: 1;
+    font-size: 13px;
+    color: var(--body);
+    line-height: 1.35;
+  }
+  .check .label .sub {
+    display: block;
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  /* Integrations */
+  .integration-row {
+    display: grid;
+    grid-template-columns: 1fr 110px;
+    gap: 12px;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .integration-row:last-child { border-bottom: 0; }
+  .integration-row .info .name {
+    font-weight: 700;
+    color: var(--indigo);
+    font-size: 14px;
+  }
+  .integration-row .info .examples {
+    font-size: 11.5px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .integration-row .info .effort {
+    font-size: 11px;
+    color: var(--green-dark);
+    font-weight: 700;
+    margin-top: 4px;
+  }
+  .stepper {
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--white);
+  }
+  .stepper button {
+    width: 32px;
+    height: 34px;
+    border: 0;
+    background: var(--offwhite);
+    color: var(--indigo);
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+  .stepper button:hover { background: var(--green-pale); }
+  .stepper input {
+    width: 46px;
+    border: 0;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--indigo);
+    background: var(--white);
+    -moz-appearance: textfield;
+  }
+  .stepper input::-webkit-outer-spin-button,
+  .stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+  /* Summary panel */
+  .summary {
+    position: sticky;
+    top: 18px;
+    align-self: start;
+  }
+  .summary-card {
+    background: var(--indigo);
+    color: var(--white);
+    border-radius: 10px;
+    padding: 24px;
+    margin-bottom: 16px;
+    border-left: 6px solid var(--green);
+    position: relative;
+    overflow: hidden;
+  }
+  .summary-card::after {
+    /* Subtle arrow accent — nod to brand visual motif */
+    content: "";
+    position: absolute;
+    right: -40px;
+    top: -20px;
+    width: 200px;
+    height: 200px;
+    background:
+      linear-gradient(135deg, transparent 50%, rgba(108, 207, 110, 0.12) 50%);
+    pointer-events: none;
+  }
+  .summary-card .sum-eyebrow {
+    font-size: 11px;
+    color: var(--mint);
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    font-weight: 700;
+    position: relative;
+    z-index: 1;
+  }
+  .summary-card .sum-title {
+    font-size: 20px;
+    font-weight: 700;
+    margin: 4px 0 18px;
+    font-family: Georgia, 'Times New Roman', serif;
+    position: relative;
+    z-index: 1;
+  }
+  .stat-block {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-bottom: 14px;
+    position: relative;
+    z-index: 1;
+  }
+  .stat {
+    background: rgba(255,255,255,0.07);
+    border-radius: 6px;
+    padding: 12px 14px;
+  }
+  .stat .stat-label {
+    font-size: 9.5px;
+    color: var(--mint);
+    letter-spacing: 2.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .stat .stat-value {
+    font-size: 22px;
+    font-weight: 700;
+    margin-top: 4px;
+    line-height: 1.1;
+    font-family: Georgia, 'Times New Roman', serif;
+  }
+  .stat .stat-unit {
+    font-size: 11px;
+    color: var(--indigo-pale);
+    margin-top: 2px;
+  }
+  .stat.full { grid-column: 1 / -1; }
+
+  .phase-list { margin-top: 14px; position: relative; z-index: 1; }
+  .phase-list .phase-row {
+    display: grid;
+    grid-template-columns: 30px 1fr auto;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.10);
+    align-items: center;
+  }
+  .phase-list .phase-row:last-child { border-bottom: 0; }
+  .phase-list .num {
+    width: 26px; height: 26px;
+    background: var(--green);
+    color: var(--indigo);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 12px;
+  }
+  .phase-list .name {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .phase-list .dates {
+    font-size: 11px;
+    color: var(--indigo-pale);
+    margin-top: 1px;
+  }
+  .phase-list .dur {
+    font-size: 11px;
+    color: var(--mint);
+    font-weight: 700;
+    text-align: right;
+  }
+
+  .actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .btn {
+    border: 0;
+    border-radius: 8px;
+    padding: 14px 20px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    transition: transform 0.12s, box-shadow 0.12s, background 0.12s;
+  }
+  .btn-primary {
+    background: var(--green);
+    color: var(--indigo);
+  }
+  .btn-primary:hover { background: var(--green-mid); transform: translateY(-1px); box-shadow: 0 6px 18px rgba(108, 207, 110, 0.35); }
+  .btn-secondary {
+    background: var(--white);
+    color: var(--indigo);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover { background: var(--offwhite); }
+
+  .section-divider {
+    border: 0;
+    height: 1px;
+    background: var(--border);
+    margin: 18px 0;
+  }
+
+  .hint {
+    font-size: 11.5px;
+    color: var(--green-dark);
+    background: var(--green-pale);
+    border-left: 3px solid var(--green);
+    padding: 8px 12px;
+    border-radius: 4px;
+    margin-top: 14px;
+    line-height: 1.4;
+  }
+
+  .footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: 11px;
+    padding: 24px;
+    letter-spacing: 1.5px;
+  }
+
+  /* Responsive */
+  @media (max-width: 1024px) {
+    .layout {
+      grid-template-columns: 1fr;
+    }
+    .summary { position: static; }
+  }
+  @media (max-width: 600px) {
+    .field-grid, .check-grid, .tier-picker { grid-template-columns: 1fr; }
+    .stat-block { grid-template-columns: 1fr; }
+    .topbar { padding: 14px 20px; flex-direction: column; align-items: flex-start; gap: 8px; }
+    .layout { padding: 18px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <!-- Inline WestCX logo (per brand guidelines) -->
+    <svg class="logo" id="brand-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 477.34 208.18" aria-label="WestCX">
+      <defs><style>.cls-1{fill:#192477;}.cls-2{fill:#6CCF6E;}</style></defs>
+      <path class="cls-2" d="M356.74,110.58c-.46,4.2-2.12,7.82-4.97,10.88-2.86,3.06-6.63,4.58-11.33,4.58-3.78,0-6.96-.91-9.53-2.74-2.58-1.82-4.52-4.38-5.8-7.66s-1.93-7.16-1.93-11.63c0-4.19.67-7.98,2-11.35,1.33-3.37,3.38-6.04,6.15-8,2.76-1.96,6.12-2.94,10.09-2.94s7.12,1.07,9.74,3.21c2.63,2.14,4.26,4.95,4.91,8.41h18.38c-.46-4.47-2.03-8.66-4.7-12.59-2.67-3.92-6.4-7.09-11.19-9.51-4.79-2.41-10.5-3.62-17.13-3.62-7.55,0-14.09,1.53-19.62,4.58-5.53,3.06-9.79,7.34-12.78,12.86-3,5.52-4.49,11.83-4.49,18.95,0,7.48,1.45,13.95,4.35,19.43,2.9,5.47,7.05,9.67,12.44,12.59,5.39,2.92,11.72,4.38,19,4.38,10.69,0,18.98-2.69,24.87-8.07,5.89-5.38,9.21-12.63,9.95-21.75h-18.38Z"/>
+      <polygon class="cls-2" points="419.75 103.05 443.24 69.81 423.35 69.81 409.11 91.15 408.84 91.15 394.61 69.81 374.71 69.81 398.2 103.05 373.88 138.21 393.92 138.21 408.84 115.09 409.11 115.09 424.04 138.21 444.07 138.21 419.75 103.05"/>
+      <polygon class="cls-1" points="75.06 120.51 74.78 120.51 62.97 69.68 43.19 69.68 31.24 120.51 30.96 120.51 19.84 69.68 1.29 69.68 19.56 138.37 40.44 138.37 52.94 84.25 53.22 84.25 65.72 138.37 86.6 138.37 104.87 69.68 86.32 69.68 75.06 120.51"/>
+      <path class="cls-1" d="M161.12,71.61c-5.08-2.75-10.69-4.12-16.83-4.12-7.6,0-14.22,1.53-19.85,4.6-5.63,3.07-9.96,7.35-12.98,12.84-3.02,5.49-4.53,11.77-4.53,18.82,0,7.51,1.53,14.04,4.6,19.57,3.07,5.54,7.39,9.8,12.98,12.78,5.58,2.98,12,4.46,19.23,4.46,8.97,0,16.3-2.2,21.98-6.59,5.68-4.4,9.25-10.12,10.71-17.17h-18.54c-.73,2.75-2.4,4.99-5.01,6.73-2.61,1.74-5.66,2.61-9.13,2.61-4.49,0-8.08-.96-10.78-2.88-2.7-1.92-4.63-4.55-5.77-7.9-.64-1.87-1.08-3.92-1.36-6.11h51.57c.27-1.65.41-3.94.41-6.87,0-7.23-1.51-13.48-4.53-18.75-3.02-5.26-7.07-9.27-12.16-12.02ZM158.17,98.26h-32.26c.31-1.89.78-3.7,1.42-5.43,1.24-3.34,3.16-6.04,5.77-8.11,2.61-2.06,5.93-3.09,9.96-3.09,3.02,0,5.68.69,7.97,2.06,2.29,1.37,4.05,3.28,5.29,5.7,1.24,2.43,1.85,5.24,1.85,8.45v.41Z"/>
+      <path class="cls-1" d="M293.68,124.29c-1.6.32-3.28.48-5.01.48-2.66,0-4.6-.59-5.84-1.79-1.24-1.19-1.85-3.11-1.85-5.77v-32.97h16.48v-14.56h-16.48v-14.54h-17.86v14.54h-12.36v14.56h12.36v34.2c0,7.33,1.94,12.84,5.84,16.55,3.89,3.71,9.09,5.56,15.59,5.56,3.48,0,6.3-.23,8.45-.69,2.15-.46,3.87-.96,5.15-1.51v-15.39c-1.37.55-2.86.99-4.46,1.3Z"/>
+      <path class="cls-1" d="M241.55,103.55c-4.31-3.52-11.63-6.3-21.98-8.31-3.94-.73-6.96-1.49-9.07-2.27-2.11-.78-3.55-1.58-4.33-2.4-.78-.82-1.17-1.79-1.17-2.88,0-1.65.85-3.09,2.54-4.33,1.69-1.24,4.42-1.85,8.17-1.85s6.8.87,8.86,2.61c1.58,1.33,2.65,2.94,3.24,4.81h18.36c-.46-3.68-1.64-7.03-3.54-10.03-2.2-3.48-5.49-6.25-9.89-8.31-4.4-2.06-9.75-3.09-16.07-3.09s-11.63.89-16.21,2.68c-4.58,1.79-8.06,4.24-10.44,7.35-2.38,3.11-3.57,6.69-3.57,10.71s.85,7.35,2.54,10.23c1.69,2.88,4.37,5.29,8.04,7.21,3.66,1.92,8.42,3.34,14.29,4.26,5.04.73,8.95,1.67,11.74,2.82,2.79,1.15,4.67,2.29,5.63,3.43.96,1.15,1.44,2.31,1.44,3.5,0,1.92-.99,3.48-2.95,4.67-1.97,1.19-5.15,1.79-9.55,1.79s-8.13-1.03-10.65-3.09c-2.05-1.67-3.4-3.76-4.09-6.25h-18.34c.49,3.82,1.78,7.41,3.88,10.78,2.43,3.89,6.02,7.03,10.78,9.41,4.76,2.38,10.58,3.57,17.45,3.57s12.52-.96,17.24-2.88c4.72-1.92,8.24-4.55,10.58-7.9,2.34-3.34,3.5-7.12,3.5-11.33,0-6.41-2.15-11.38-6.46-14.9Z"/>
+      <polygon class="cls-2" points="474.8 204.95 297.46 204.95 297.46 196.92 466.77 196.92 466.77 11.26 297.46 11.26 297.46 3.23 474.8 3.23 474.8 204.95"/>
+    </svg>
+    <div class="pipe"></div>
+    <div class="titles">
+      <h1>Orchestrate implementation</h1>
+      <div class="sub">Level of effort calculator</div>
+    </div>
+  </div>
+  <div class="meta">Customer-facing scoping tool</div>
+</div>
+
+<div class="layout">
+
+  <!-- ============ FORM SIDE ============ -->
+  <div>
+
+    <!-- Project setup -->
+    <div class="card">
+      <h2>Project setup</h2>
+      <div class="card-title">Who is this engagement for?</div>
+      <div class="field-grid">
+        <div class="field full">
+          <label class="field-label" for="customerName">Customer / project name</label>
+          <input type="text" id="customerName" placeholder="e.g. Acme Inc. — Customer service automation" value="" />
+        </div>
+        <div class="field">
+          <label class="field-label" for="startDate">Estimated kickoff date</label>
+          <input type="date" id="startDate" />
+        </div>
+        <div class="field">
+          <label class="field-label" for="ownerName">Project owner (WestCX)</label>
+          <input type="text" id="ownerName" placeholder="Lead implementation manager" value="" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Engagement Sizing -->
+    <div class="card">
+      <h2>Engagement sizing</h2>
+      <div class="card-title">Pick the complexity tier</div>
+      <p class="card-help">This sets your base timeline and resourcing. Integrations and add-ons stack on top.</p>
+
+      <div class="tier-picker" id="tierPicker">
+        <label class="tier-option" data-tier="simple">
+          <input type="radio" name="tier" value="simple" />
+          <div class="tier-name">Simple</div>
+          <div class="tier-dur">4–5 weeks</div>
+          <div class="tier-meta">1–5 intents · 1 language · single transfer pattern · 1 dev</div>
+        </label>
+        <label class="tier-option selected" data-tier="medium">
+          <input type="radio" name="tier" value="medium" checked />
+          <div class="tier-name">Medium</div>
+          <div class="tier-dur">6–7 weeks</div>
+          <div class="tier-meta">6–15 intents · 2 languages · transfer + DB + chaining · 1–2 devs</div>
+        </label>
+        <label class="tier-option" data-tier="complex">
+          <input type="radio" name="tier" value="complex" />
+          <div class="tier-name">Complex</div>
+          <div class="tier-dur">8–10 weeks</div>
+          <div class="tier-meta">15+ intents · 3+ languages · full action suite · 2 devs</div>
+        </label>
+      </div>
+
+      <hr class="section-divider" />
+
+      <div class="field-grid">
+        <div class="field">
+          <label class="field-label" for="intentCount">Number of intents</label>
+          <input type="number" id="intentCount" min="1" max="100" value="10" />
+        </div>
+        <div class="field">
+          <label class="field-label" for="languageCount">Number of languages</label>
+          <input type="number" id="languageCount" min="1" max="10" value="2" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Action Capabilities -->
+    <div class="card">
+      <h2>Action capabilities</h2>
+      <div class="card-title">What does the agent need to do?</div>
+      <p class="card-help">Selected actions inform Phase 1 scope, system prompt complexity, and downstream client inputs.</p>
+
+      <div class="check-grid" id="actionsGrid">
+        <label class="check">
+          <input type="checkbox" data-action="transfer" checked />
+          <div class="label">Transfer to live agent
+            <span class="sub">Hand-off to humans with bilingual announcements</span>
+          </div>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-action="database" checked />
+          <div class="label">Database writes
+            <span class="sub">Capture caller data into your tenant tables</span>
+          </div>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-action="chaining" />
+          <div class="label">Conditional intent chaining
+            <span class="sub">Multi-step flows with branching logic</span>
+          </div>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-action="sms" />
+          <div class="label">SMS / RCS messaging
+            <span class="sub">Triggers 10DLC registration (2–4 wk lead time)</span>
+          </div>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-action="stripe" />
+          <div class="label">Stripe payments
+            <span class="sub">PCI-aware payment collection</span>
+          </div>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-action="custom" />
+          <div class="label">Custom action types
+            <span class="sub">New runtime handlers required (+1–2 wks platform work)</span>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <!-- Integrations -->
+    <div class="card">
+      <h2>Integrations</h2>
+      <div class="card-title">External systems to connect</div>
+      <p class="card-help">Each integration is scoped at discovery and built into Phase 1. Effort below stacks onto your tier base.</p>
+
+      <div id="integrationsList">
+        <div class="integration-row" data-integration="telephonyUC">
+          <div class="info">
+            <div class="name">Telephony &amp; UC platforms</div>
+            <div class="examples">Cisco UCM · Webex · Contact Center · Genesys · Avaya · RingCentral</div>
+            <div class="effort">+1–3 weeks per platform</div>
+          </div>
+          <div class="stepper">
+            <button type="button" data-action="dec">−</button>
+            <input type="number" min="0" max="10" value="0" />
+            <button type="button" data-action="inc">+</button>
+          </div>
+        </div>
+
+        <div class="integration-row" data-integration="crm">
+          <div class="info">
+            <div class="name">CRM &amp; service management</div>
+            <div class="examples">Salesforce · ServiceNow · Zendesk · HubSpot · Dynamics</div>
+            <div class="effort">+1–2 weeks per system</div>
+          </div>
+          <div class="stepper">
+            <button type="button" data-action="dec">−</button>
+            <input type="number" min="0" max="10" value="0" />
+            <button type="button" data-action="inc">+</button>
+          </div>
+        </div>
+
+        <div class="integration-row" data-integration="documentedAPI">
+          <div class="info">
+            <div class="name">Line-of-business APIs (documented)</div>
+            <div class="examples">Scheduling · dispatch · billing · inventory — REST/SOAP with docs &amp; sandbox</div>
+            <div class="effort">+3–7 days per API</div>
+          </div>
+          <div class="stepper">
+            <button type="button" data-action="dec">−</button>
+            <input type="number" min="0" max="20" value="0" />
+            <button type="button" data-action="inc">+</button>
+          </div>
+        </div>
+
+        <div class="integration-row" data-integration="analysisRequiredAPI">
+          <div class="info">
+            <div class="name">APIs requiring analysis</div>
+            <div class="examples">Undocumented · legacy · proprietary · no sandbox · screen-scrape</div>
+            <div class="effort">+2–4 weeks per system</div>
+          </div>
+          <div class="stepper">
+            <button type="button" data-action="dec">−</button>
+            <input type="number" min="0" max="10" value="0" />
+            <button type="button" data-action="inc">+</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="hint" id="integrationHint" style="display:none;"></div>
+    </div>
+
+    <!-- Add-ons -->
+    <div class="card">
+      <h2>Add-ons &amp; options</h2>
+      <div class="card-title">Optional extensions</div>
+
+      <div class="check-grid">
+        <label class="check">
+          <input type="checkbox" data-addon="extendedHypercare" />
+          <div class="label">Extended hypercare (8 weeks)
+            <span class="sub">Default is 2–4 weeks; doubles monitoring window</span>
+          </div>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-addon="failoverMatrix" checked />
+          <div class="label">Provider failover validation
+            <span class="sub">TTS / LLM / telephony / STT all tested before go-live</span>
+          </div>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-addon="customBranding" />
+          <div class="label">Custom branded portal
+            <span class="sub">Tenant-specific UI theming (+3–5 days)</span>
+          </div>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-addon="compliance" />
+          <div class="label">Compliance assessment
+            <span class="sub">HIPAA / TCPA / SOC 2 / CJIS / PCI scoping (+1 week)</span>
+          </div>
+        </label>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ============ SUMMARY SIDE ============ -->
+  <div class="summary">
+
+    <div class="summary-card">
+      <div class="sum-eyebrow">Estimated engagement</div>
+      <div class="sum-title" id="summaryTitle">Medium tier · multi-language</div>
+
+      <div class="stat-block">
+        <div class="stat">
+          <div class="stat-label">To go-live</div>
+          <div class="stat-value" id="goLiveDuration">5–7</div>
+          <div class="stat-unit">weeks (phases 0–3)</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">+ Hypercare</div>
+          <div class="stat-value" id="hypercareDuration">2–4</div>
+          <div class="stat-unit">weeks of monitoring</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">WestCX effort</div>
+          <div class="stat-value" id="kaiHours">204–304</div>
+          <div class="stat-unit">person-hours</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Client effort</div>
+          <div class="stat-value" id="clientHours">30–55</div>
+          <div class="stat-unit">person-hours</div>
+        </div>
+        <div class="stat full">
+          <div class="stat-label">Resourcing</div>
+          <div class="stat-value" id="devCount" style="font-size:16px;">1–2 WestCX engineers</div>
+          <div class="stat-unit" id="endToEndUnit">End-to-end engagement: 7–11 weeks total</div>
+        </div>
+      </div>
+
+      <div style="font-size:11px; color: var(--mint); letter-spacing: 2.5px; font-weight: 700; text-transform: uppercase; margin-top:6px; position: relative; z-index: 1;">Phase plan</div>
+      <div class="phase-list" id="phaseList"></div>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-primary" id="generatePdfBtn">Download project plan PDF</button>
+      <button class="btn btn-secondary" id="resetBtn">Reset to defaults</button>
+    </div>
+
+    <div style="font-size: 11px; color: var(--muted); margin-top: 14px; line-height: 1.5;">
+      Estimates derived from the WestCX Orchestrate implementation playbook. Actual engagement timelines and effort are confirmed at scoping discovery.
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">WESTCX  ·  ORCHESTRATE IMPLEMENTATION CALCULATOR</div>
+
+<script>
+// =================== CONSTANTS ===================
+const TIERS = {
+  simple:  { name: 'Simple',  baseWeeks: [4, 5],   kaiHours: [140, 184], devs: '1',   defaultIntents: 3,  defaultLanguages: 1 },
+  medium:  { name: 'Medium',  baseWeeks: [6, 7],   kaiHours: [204, 304], devs: '1–2', defaultIntents: 10, defaultLanguages: 2 },
+  complex: { name: 'Complex', baseWeeks: [8, 10],  kaiHours: [344, 492], devs: '2',   defaultIntents: 18, defaultLanguages: 3 }
+};
+
+const INTEGRATION_EFFORT = {
+  telephonyUC:         { name: 'Telephony & UC',          perPlatformLow: 5,  perPlatformHigh: 15 },
+  crm:                 { name: 'CRM & service mgmt',      perPlatformLow: 5,  perPlatformHigh: 10 },
+  documentedAPI:       { name: 'Documented LOB APIs',     perPlatformLow: 3,  perPlatformHigh: 7  },
+  analysisRequiredAPI: { name: 'APIs requiring analysis', perPlatformLow: 10, perPlatformHigh: 20 }
+};
+
+const PHASE_BASE_DAYS = {
+  simple:  { p0: [3, 3],  p1: [10, 14], p2: [5, 5], p3: [5, 5], p4: [10, 14] },
+  medium:  { p0: [3, 5],  p1: [14, 21], p2: [5, 5], p3: [5, 5], p4: [10, 21] },
+  complex: { p0: [5, 7],  p1: [21, 28], p2: [5, 7], p3: [5, 7], p4: [14, 28] }
+};
+
+const ADDON_EFFORT = {
+  customBranding: { p0: [3, 5] },
+  compliance:     { p3: [5, 5] },
+  extendedHypercare: { p4Replace: [28, 40] }
+};
+
+// =================== STATE ===================
+const state = {
+  tier: 'medium',
+  customerName: '',
+  startDate: defaultStartDate(),
+  ownerName: '',
+  intentCount: 10,
+  languageCount: 2,
+  actions: { transfer: true, database: true, chaining: false, sms: false, stripe: false, custom: false },
+  integrations: { telephonyUC: 0, crm: 0, documentedAPI: 0, analysisRequiredAPI: 0 },
+  addons: { extendedHypercare: false, failoverMatrix: true, customBranding: false, compliance: false }
+};
+
+let LOGO_PNG_DATA_URL = null; // populated by rasterizing inline SVG on load
+
+function defaultStartDate() {
+  const d = new Date();
+  d.setDate(d.getDate() + 14);
+  return d.toISOString().slice(0, 10);
+}
+
+// =================== LOGO RASTERIZATION (for PDF) ===================
+function rasterizeLogo() {
+  const svgEl = document.getElementById('brand-logo');
+  if (!svgEl) return Promise.resolve(null);
+  let svgString = new XMLSerializer().serializeToString(svgEl);
+  // Ensure the SVG has explicit width/height for canvas drawImage sizing
+  if (!/width=/.test(svgString)) {
+    svgString = svgString.replace('<svg', '<svg width="954" height="416"');
+  }
+  return new Promise((resolve) => {
+    const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const w = img.naturalWidth || 954;
+      const h = img.naturalHeight || 416;
+      canvas.width = w * 2;
+      canvas.height = h * 2;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      LOGO_PNG_DATA_URL = canvas.toDataURL('image/png');
+      URL.revokeObjectURL(url);
+      resolve(LOGO_PNG_DATA_URL);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    img.src = url;
+  });
+}
+
+// =================== CALCULATIONS ===================
+function calc() {
+  const tier = TIERS[state.tier];
+  const baseDays = PHASE_BASE_DAYS[state.tier];
+
+  let extraDaysLow = 0, extraDaysHigh = 0;
+  const integrationLines = [];
+  for (const key of Object.keys(state.integrations)) {
+    const count = state.integrations[key];
+    if (count > 0) {
+      const cfg = INTEGRATION_EFFORT[key];
+      const lo = count * cfg.perPlatformLow;
+      const hi = count * cfg.perPlatformHigh;
+      extraDaysLow += lo;
+      extraDaysHigh += hi;
+      integrationLines.push({ key, name: cfg.name, count, lowDays: lo, highDays: hi });
+    }
+  }
+
+  let actionAdjLow = 0, actionAdjHigh = 0;
+  if (state.actions.custom) { actionAdjLow += 5; actionAdjHigh += 10; }
+  if (state.actions.chaining) { actionAdjLow += 1; actionAdjHigh += 3; }
+  if (state.actions.sms) { actionAdjLow += 1; actionAdjHigh += 2; }
+  if (state.actions.stripe) { actionAdjLow += 2; actionAdjHigh += 4; }
+
+  const extraLangs = Math.max(0, state.languageCount - tier.defaultLanguages);
+  const langAdjLow = extraLangs * 2;
+  const langAdjHigh = extraLangs * 4;
+
+  const extraIntents = Math.max(0, state.intentCount - tier.defaultIntents);
+  const intentAdjLow = Math.ceil(extraIntents * 0.4);
+  const intentAdjHigh = Math.ceil(extraIntents * 0.8);
+
+  let p0 = baseDays.p0.slice();
+  let p1 = [
+    baseDays.p1[0] + extraDaysLow + actionAdjLow + langAdjLow + intentAdjLow,
+    baseDays.p1[1] + extraDaysHigh + actionAdjHigh + langAdjHigh + intentAdjHigh
+  ];
+  let p2 = baseDays.p2.slice();
+  let p3 = baseDays.p3.slice();
+  let p4 = baseDays.p4.slice();
+
+  if (state.addons.customBranding) {
+    p0 = [p0[0] + ADDON_EFFORT.customBranding.p0[0], p0[1] + ADDON_EFFORT.customBranding.p0[1]];
+  }
+  if (state.addons.compliance) {
+    p3 = [p3[0] + ADDON_EFFORT.compliance.p3[0], p3[1] + ADDON_EFFORT.compliance.p3[1]];
+  }
+  if (state.addons.extendedHypercare) {
+    p4 = ADDON_EFFORT.extendedHypercare.p4Replace.slice();
+  }
+
+  const toCalDays = d => Math.round(d * 1.4);
+  const phases = [
+    { num: 0, name: 'Tenant bootstrap',         workDays: p0, owner: 'WestCX only' },
+    { num: 1, name: 'Intent design & authoring', workDays: p1, owner: 'WestCX + your SME' },
+    { num: 2, name: 'Validation & tuning',       workDays: p2, owner: 'WestCX + your testers' },
+    { num: 3, name: 'Go-live preparation',       workDays: p3, owner: 'WestCX + your ops/telecom' },
+    { num: 4, name: 'Hypercare',                 workDays: p4, owner: 'WestCX monitoring' }
+  ];
+
+  const startDate = new Date(state.startDate);
+  let cursor = new Date(startDate);
+  let totalCalDaysLow = 0, totalCalDaysHigh = 0;
+  let goLiveCalDaysLow = 0, goLiveCalDaysHigh = 0;
+  for (const ph of phases) {
+    const calLow = toCalDays(ph.workDays[0]);
+    const calHigh = toCalDays(ph.workDays[1]);
+    const midCal = Math.round((calLow + calHigh) / 2);
+    ph.startDate = new Date(cursor);
+    ph.endDate = new Date(cursor);
+    ph.endDate.setDate(ph.endDate.getDate() + midCal);
+    ph.calDaysLow = calLow;
+    ph.calDaysHigh = calHigh;
+    totalCalDaysLow += calLow;
+    totalCalDaysHigh += calHigh;
+    if (ph.num <= 3) {
+      goLiveCalDaysLow += calLow;
+      goLiveCalDaysHigh += calHigh;
+    }
+    cursor = new Date(ph.endDate);
+  }
+
+  const totalWeeksLow = Math.round(totalCalDaysLow / 7 * 10) / 10;
+  const totalWeeksHigh = Math.round(totalCalDaysHigh / 7 * 10) / 10;
+  const goLiveWeeksLow = Math.round(goLiveCalDaysLow / 7 * 10) / 10;
+  const goLiveWeeksHigh = Math.round(goLiveCalDaysHigh / 7 * 10) / 10;
+  const hypercareWeeksLow = Math.round((p4[0] * 1.4) / 7 * 10) / 10;
+  const hypercareWeeksHigh = Math.round((p4[1] * 1.4) / 7 * 10) / 10;
+
+  const kaiHoursLow = tier.kaiHours[0] + Math.round(extraDaysLow * 7) + actionAdjLow * 6;
+  const kaiHoursHigh = tier.kaiHours[1] + Math.round(extraDaysHigh * 8) + actionAdjHigh * 8;
+
+  let clientLow = 30, clientHigh = 55;
+  clientLow += state.integrations.telephonyUC * 4 + state.integrations.crm * 2 + state.integrations.documentedAPI * 1.5 + state.integrations.analysisRequiredAPI * 4;
+  clientHigh += state.integrations.telephonyUC * 8 + state.integrations.crm * 4 + state.integrations.documentedAPI * 3 + state.integrations.analysisRequiredAPI * 8;
+  if (state.addons.compliance) { clientLow += 4; clientHigh += 8; }
+  if (state.addons.extendedHypercare) { clientHigh += 4; }
+
+  return {
+    tier, phases, integrationLines,
+    totalWeeks: [totalWeeksLow, totalWeeksHigh],
+    goLiveWeeks: [goLiveWeeksLow, goLiveWeeksHigh],
+    hypercareWeeks: [hypercareWeeksLow, hypercareWeeksHigh],
+    kaiHours: [Math.round(kaiHoursLow), Math.round(kaiHoursHigh)],
+    clientHours: [Math.round(clientLow), Math.round(clientHigh)],
+    extraDaysLow, extraDaysHigh
+  };
+}
+
+// =================== RENDER ===================
+function fmtDate(d) {
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+function fmtRange(arr) {
+  if (arr[0] === arr[1]) return String(arr[0]);
+  return `${arr[0]}–${arr[1]}`;
+}
+function render() {
+  const r = calc();
+
+  const tierName = r.tier.name;
+  const langPart = state.languageCount > 1 ? `${state.languageCount}-language` : 'single-language';
+  document.getElementById('summaryTitle').textContent = `${tierName} tier · ${langPart}`;
+
+  document.getElementById('goLiveDuration').textContent = fmtRange(r.goLiveWeeks);
+  document.getElementById('hypercareDuration').textContent = fmtRange(r.hypercareWeeks);
+  document.getElementById('kaiHours').textContent = fmtRange(r.kaiHours);
+  document.getElementById('clientHours').textContent = fmtRange(r.clientHours);
+  document.getElementById('devCount').textContent = r.tier.devs + ' WestCX engineer' + (r.tier.devs === '1' ? '' : 's');
+  document.getElementById('endToEndUnit').textContent = `End-to-end engagement: ${fmtRange(r.totalWeeks)} weeks total`;
+
+  const list = document.getElementById('phaseList');
+  list.innerHTML = '';
+  for (const ph of r.phases) {
+    const wkRangeLow = Math.round(ph.calDaysLow / 7 * 10) / 10;
+    const wkRangeHigh = Math.round(ph.calDaysHigh / 7 * 10) / 10;
+    const durTxt = wkRangeLow === wkRangeHigh ? `${wkRangeLow} wk` : `${wkRangeLow}–${wkRangeHigh} wk`;
+    const row = document.createElement('div');
+    row.className = 'phase-row';
+    row.innerHTML = `
+      <div class="num">${ph.num}</div>
+      <div>
+        <div class="name">${ph.name}</div>
+        <div class="dates">${fmtDate(ph.startDate)} → ${fmtDate(ph.endDate)}</div>
+      </div>
+      <div class="dur">${durTxt}</div>
+    `;
+    list.appendChild(row);
+  }
+
+  const hint = document.getElementById('integrationHint');
+  const totalIntegrations = Object.values(state.integrations).reduce((a,b)=>a+b, 0);
+  if (totalIntegrations > 0) {
+    hint.style.display = 'block';
+    hint.textContent = `${totalIntegrations} integration${totalIntegrations === 1 ? '' : 's'} adds ${r.extraDaysLow}–${r.extraDaysHigh} working days to Phase 1.`;
+  } else {
+    hint.style.display = 'none';
+  }
+}
+
+// =================== EVENTS ===================
+function bind() {
+  document.querySelectorAll('.tier-option').forEach(el => {
+    el.addEventListener('click', e => {
+      const tier = el.dataset.tier;
+      state.tier = tier;
+      const tcfg = TIERS[tier];
+      document.getElementById('intentCount').value = tcfg.defaultIntents;
+      document.getElementById('languageCount').value = tcfg.defaultLanguages;
+      state.intentCount = tcfg.defaultIntents;
+      state.languageCount = tcfg.defaultLanguages;
+      el.querySelector('input').checked = true;
+      document.querySelectorAll('.tier-option').forEach(o => o.classList.toggle('selected', o === el));
+      render();
+    });
+  });
+
+  document.getElementById('customerName').addEventListener('input', e => { state.customerName = e.target.value; });
+  document.getElementById('ownerName').addEventListener('input', e => { state.ownerName = e.target.value; });
+  document.getElementById('startDate').value = state.startDate;
+  document.getElementById('startDate').addEventListener('change', e => { state.startDate = e.target.value; render(); });
+
+  document.getElementById('intentCount').addEventListener('input', e => {
+    state.intentCount = Math.max(1, parseInt(e.target.value) || 1);
+    render();
+  });
+  document.getElementById('languageCount').addEventListener('input', e => {
+    state.languageCount = Math.max(1, parseInt(e.target.value) || 1);
+    render();
+  });
+
+  document.querySelectorAll('[data-action]').forEach(el => {
+    if (el.tagName === 'BUTTON') return;
+    el.addEventListener('change', e => {
+      const key = el.dataset.action;
+      state.actions[key] = el.checked;
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-addon]').forEach(el => {
+    el.addEventListener('change', e => {
+      state.addons[el.dataset.addon] = el.checked;
+      render();
+    });
+  });
+
+  document.querySelectorAll('.integration-row').forEach(row => {
+    const key = row.dataset.integration;
+    const input = row.querySelector('input');
+    const dec = row.querySelector('[data-action="dec"]');
+    const inc = row.querySelector('[data-action="inc"]');
+    function update(val) {
+      const v = Math.max(0, Math.min(parseInt(input.max), val));
+      input.value = v;
+      state.integrations[key] = v;
+      render();
+    }
+    dec.addEventListener('click', () => update(parseInt(input.value || 0) - 1));
+    inc.addEventListener('click', () => update(parseInt(input.value || 0) + 1));
+    input.addEventListener('input', e => update(parseInt(e.target.value) || 0));
+  });
+
+  document.getElementById('resetBtn').addEventListener('click', () => {
+    location.reload();
+  });
+
+  document.getElementById('generatePdfBtn').addEventListener('click', generatePdf);
+}
+
+// =================== PDF GENERATION ===================
+function generatePdf() {
+  const r = calc();
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'letter' });
+  const PW = doc.internal.pageSize.getWidth();   // 612
+  const PH = doc.internal.pageSize.getHeight();  // 792
+
+  // WestCX brand colors (RGB) — per Brand Identity Guidelines
+  const INDIGO       = [25, 36, 119];
+  const INDIGO_MID   = [71, 80, 146];
+  const INDIGO_SOFT  = [117, 124, 173];
+  const INDIGO_PALE  = [209, 211, 229];
+  const GREEN        = [108, 207, 110];
+  const GREEN_DARK   = [59, 114, 61];     // WestCX Evergreen
+  const MINT         = [168, 247, 141];
+  const GREEN_PALE   = [212, 238, 209];
+  const OFFWHITE     = [244, 242, 241];
+  const WHITE        = [255, 255, 255];
+  const BORDER       = [226, 228, 237];
+  const BODY         = [52, 57, 94];
+  const MUTED        = [107, 113, 150];
+  const AMBER        = [217, 119, 6];
+  const AMBER_BG     = [255, 247, 230];
+  const AMBER_TEXT   = [122, 70, 12];
+
+  function setFillRGB(c) { doc.setFillColor(c[0], c[1], c[2]); }
+  function setTextRGB(c) { doc.setTextColor(c[0], c[1], c[2]); }
+  function setDrawRGB(c) { doc.setDrawColor(c[0], c[1], c[2]); }
+
+  function drawHeader(pageTitle) {
+    setFillRGB(WHITE);
+    doc.rect(0, 0, PW, 50, 'F');
+    setFillRGB(GREEN);
+    doc.rect(0, 50, PW, 2, 'F');
+
+    // Logo on the left of header
+    if (LOGO_PNG_DATA_URL) {
+      doc.addImage(LOGO_PNG_DATA_URL, 'PNG', 36, 14, 70, 30);
+    } else {
+      setTextRGB(INDIGO);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text('WESTCX', 36, 32);
+    }
+    // Title on the right
+    setTextRGB(INDIGO);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text(pageTitle, PW - 36, 32, { align: 'right' });
+  }
+
+  function drawFooter(pageNum, totalPages) {
+    setTextRGB(MUTED);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Project plan generated by the WestCX Orchestrate LOE calculator', 36, PH - 20);
+    if (totalPages > 0) {
+      doc.text(`Page ${pageNum} of ${totalPages}`, PW - 36, PH - 20, { align: 'right' });
+    }
+  }
+
+  // ============ PAGE 1 — COVER ============
+  setFillRGB(INDIGO);
+  doc.rect(0, 0, PW, PH, 'F');
+  // Brand "arrow" gesture: a green diagonal accent on the right side
+  setFillRGB(GREEN);
+  doc.triangle(PW, 0, PW, PH, PW - 200, PH / 2, 'F');
+  setFillRGB(GREEN_DARK);
+  doc.triangle(PW - 100, 0, PW - 100, PH, PW - 220, PH / 2, 'F');
+  setFillRGB(INDIGO);
+  doc.triangle(PW - 90, 0, PW - 90, PH, PW - 250, PH / 2, 'F');
+
+  // Logo top-left (white reverse logo would be ideal; we use the color logo on a clear plate)
+  if (LOGO_PNG_DATA_URL) {
+    setFillRGB(WHITE);
+    doc.roundedRect(40, 40, 130, 56, 4, 4, 'F');
+    doc.addImage(LOGO_PNG_DATA_URL, 'PNG', 50, 52, 110, 32);
+  } else {
+    setTextRGB(WHITE);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('WESTCX', 50, 70);
+  }
+
+  // Eyebrow
+  setTextRGB(MINT);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setCharSpace(4);
+  doc.text('ORCHESTRATE  /  PROJECT PLAN', 50, 150);
+  doc.setCharSpace(0);
+
+  // Title (sentence case, serif "times" for brand serif feel)
+  setTextRGB(WHITE);
+  doc.setFontSize(36);
+  doc.setFont('times', 'bold');
+  doc.text('Implementing Orchestrate', 50, 210);
+
+  // Customer name
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(20);
+  setTextRGB(INDIGO_PALE);
+  const customerLine = state.customerName || '— Customer name TBD —';
+  doc.text(customerLine, 50, 248);
+
+  // Spec block
+  setFillRGB(INDIGO_MID);
+  doc.rect(50, 320, PW - 100, 220, 'F');
+  setFillRGB(GREEN);
+  doc.rect(50, 320, 4, 220, 'F');
+
+  setTextRGB(MINT);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setCharSpace(3);
+  doc.text('AT A GLANCE', 70, 348);
+  doc.setCharSpace(0);
+
+  const statBoxes = [
+    { label: 'TIER',           value: r.tier.name },
+    { label: 'TO GO-LIVE',     value: fmtRange(r.goLiveWeeks) + ' wk' },
+    { label: 'WESTCX HOURS',   value: fmtRange(r.kaiHours) },
+    { label: 'CLIENT HOURS',   value: fmtRange(r.clientHours) }
+  ];
+  const sBlockW = PW - 100 - 40;
+  const sCellW = sBlockW / 2;
+  statBoxes.forEach((s, i) => {
+    const col = i % 2;
+    const row = Math.floor(i / 2);
+    const x = 70 + col * sCellW;
+    const yBase = 388 + row * 56;
+    setTextRGB(INDIGO_PALE);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setCharSpace(2);
+    doc.text(s.label, x, yBase);
+    doc.setCharSpace(0);
+    setTextRGB(WHITE);
+    doc.setFontSize(20);
+    doc.setFont('times', 'bold');
+    doc.text(String(s.value), x, yBase + 26);
+    doc.setFont('helvetica', 'normal');
+  });
+
+  // Hypercare callout inside the block
+  setTextRGB(MINT);
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.setCharSpace(2);
+  doc.text(`+ ${fmtRange(r.hypercareWeeks)} WEEKS HYPERCARE  ·  END-TO-END ${fmtRange(r.totalWeeks)} WEEKS TOTAL`, 70, 518);
+  doc.setCharSpace(0);
+
+  // Date and prepared-by
+  setTextRGB(INDIGO_PALE);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Generated on ' + fmtDate(new Date()), 70, 564);
+  if (state.ownerName) {
+    doc.text('Project owner: ' + state.ownerName, 70, 580);
+  }
+  doc.text('Estimated kickoff: ' + fmtDate(new Date(state.startDate)), 70, state.ownerName ? 596 : 580);
+
+  // Methodology line at bottom
+  setTextRGB(MINT);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setCharSpace(3);
+  doc.text('METHODOLOGY', 50, PH - 90);
+  doc.setCharSpace(0);
+  setTextRGB(INDIGO_PALE);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(11);
+  doc.text('Five sequential phases. Every phase ends at a non-negotiable quality gate.', 50, PH - 70);
+  doc.text('No phase progresses until the prior gate is met.', 50, PH - 53);
+
+  // ============ PAGE 2 — EFFORT SUMMARY (moved up) ============
+  doc.addPage();
+  drawHeader('Effort summary');
+
+  let y = 80;
+  setTextRGB(GREEN_DARK);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setCharSpace(3);
+  doc.text('RESOURCE COMMITMENT', 36, y);
+  doc.setCharSpace(0);
+  y += 16;
+  setTextRGB(INDIGO);
+  doc.setFontSize(20);
+  doc.setFont('times', 'bold');
+  doc.text('Where the time goes', 36, y);
+  doc.setFont('helvetica', 'normal');
+  y += 28;
+
+  // ---- CLIENT TEAM (above WestCX team, headed by customer name) ----
+  const clientHeader = (state.customerName && state.customerName.trim()) ? state.customerName.trim() : 'Customer team';
+  doc.autoTable({
+    head: [[clientHeader, 'Effort', 'When']],
+    body: [
+      ['Project sponsor',           '5–7 hrs',         'Kickoff, reviews, sign-off, weekly checks'],
+      ['Subject-matter expert',     '8–14 hrs',        'Phase 1 — workflow definition & domain context'],
+      ['UAT testers (2–3 people)',  '12–24 hrs total', 'Phase 2 — walk every intent in every language'],
+      ['IT / telecom contact',      '3–4 hrs',         'Phase 3 — DID provisioning & routing'],
+      ['Operations lead',           '4–6 hrs',         'Phase 3 + Phase 4 — go-live & hypercare'],
+      ['Integration owners',        Object.values(state.integrations).reduce((a,b)=>a+b,0) > 0 ? `~${Math.max(0, r.clientHours[0]-30)}–${Math.max(0, r.clientHours[1]-55)} hrs` : '—', 'Phase 1 — credentials, sandbox, schema review']
+    ],
+    startY: y,
+    margin: { left: 36, right: 36 },
+    theme: 'plain',
+    styles: { font: 'helvetica', fontSize: 10, cellPadding: 8, lineColor: BORDER, lineWidth: 0.4 },
+    headStyles: { fillColor: INDIGO, textColor: WHITE, fontStyle: 'bold' },
+    columnStyles: {
+      0: { fontStyle: 'bold', textColor: INDIGO },
+      1: { textColor: GREEN_DARK, fontStyle: 'bold' },
+      2: { textColor: BODY }
+    },
+    alternateRowStyles: { fillColor: OFFWHITE }
+  });
+  y = doc.lastAutoTable.finalY + 8;
+  setTextRGB(BODY);
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(9);
+  doc.text(`Total estimated client effort: ${fmtRange(r.clientHours)} person-hours across the engagement.`, 36, y);
+  y += 22;
+
+  // ---- WESTCX TEAM ----
+  function fmtDays(arr) {
+    if (arr[0] === arr[1]) return `${arr[0]} working day${arr[0] === 1 ? '' : 's'}`;
+    return `${arr[0]}–${arr[1]} working days`;
+  }
+  doc.autoTable({
+    head: [['WestCX team', 'Effort']],
+    body: [
+      ['Implementation engineer(s)', `${r.tier.devs} dev(s), ${fmtRange(r.kaiHours)} hours total`],
+      ['Phase 0: Tenant bootstrap',  fmtDays(r.phases[0].workDays)],
+      ['Phase 1: Intent design',     fmtDays(r.phases[1].workDays)],
+      ['Phase 2: Validation',        fmtDays(r.phases[2].workDays)],
+      ['Phase 3: Go-live prep',      fmtDays(r.phases[3].workDays)],
+      ['Phase 4: Hypercare',         fmtDays(r.phases[4].workDays)]
+    ],
+    startY: y,
+    margin: { left: 36, right: 36 },
+    theme: 'plain',
+    styles: { font: 'helvetica', fontSize: 10, cellPadding: 8, lineColor: BORDER, lineWidth: 0.4 },
+    headStyles: { fillColor: INDIGO, textColor: WHITE, fontStyle: 'bold' },
+    columnStyles: {
+      0: { fontStyle: 'bold', textColor: INDIGO },
+      1: { textColor: GREEN_DARK }
+    },
+    alternateRowStyles: { fillColor: OFFWHITE }
+  });
+  y = doc.lastAutoTable.finalY + 14;
+  setTextRGB(BODY);
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(9);
+  doc.text(`Total WestCX engineering effort: ${fmtRange(r.kaiHours)} person-hours across the engagement.`, 36, y);
+
+  // ============ PAGE 3 — ENGAGEMENT OVERVIEW ============
+  doc.addPage();
+  drawHeader('Engagement overview');
+
+  y = 80;
+  setTextRGB(GREEN_DARK);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setCharSpace(3);
+  doc.text('SCOPE', 36, y);
+  doc.setCharSpace(0);
+  y += 16;
+  setTextRGB(INDIGO);
+  doc.setFontSize(20);
+  doc.setFont('times', 'bold');
+  doc.text('What you are launching', 36, y);
+  doc.setFont('helvetica', 'normal');
+  y += 26;
+
+  const scopeItems = [
+    { label: 'COMPLEXITY TIER',    value: r.tier.name + ' (' + r.tier.devs + ' devs)' },
+    { label: 'INTENTS',            value: String(state.intentCount) },
+    { label: 'LANGUAGES',          value: String(state.languageCount) },
+    { label: 'INTEGRATIONS',       value: String(Object.values(state.integrations).reduce((a,b)=>a+b,0)) },
+    { label: 'ACTION TYPES',       value: Object.entries(state.actions).filter(([_,v])=>v).map(([k])=>actionLabel(k)).join(', ') || '—' },
+    { label: 'ADD-ONS',            value: Object.entries(state.addons).filter(([_,v])=>v).map(([k])=>addonLabel(k)).join(', ') || 'None' }
+  ];
+
+  const colW = (PW - 72 - 18) / 2;
+  scopeItems.forEach((it, i) => {
+    const col = i % 2;
+    const row = Math.floor(i / 2);
+    const x = 36 + col * (colW + 18);
+    const yy = y + row * 60;
+    setFillRGB(WHITE);
+    setDrawRGB(BORDER);
+    doc.setLineWidth(0.6);
+    doc.rect(x, yy, colW, 50, 'FD');
+    setFillRGB(GREEN);
+    doc.rect(x, yy, 3, 50, 'F');
+    setTextRGB(MUTED);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setCharSpace(2.5);
+    doc.text(it.label, x + 12, yy + 16);
+    doc.setCharSpace(0);
+    setTextRGB(INDIGO);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    const valueLines = doc.splitTextToSize(String(it.value), colW - 24);
+    doc.text(valueLines.slice(0, 2), x + 12, yy + 32);
+  });
+
+  y += 60 * Math.ceil(scopeItems.length / 2) + 20;
+
+  setTextRGB(GREEN_DARK);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setCharSpace(3);
+  doc.text('THE METHODOLOGY', 36, y);
+  doc.setCharSpace(0);
+  y += 16;
+  setTextRGB(INDIGO);
+  doc.setFontSize(16);
+  doc.setFont('times', 'bold');
+  doc.text('Five phases, sequential, gated', 36, y);
+  doc.setFont('helvetica', 'normal');
+  y += 22;
+  setTextRGB(BODY);
+  doc.setFontSize(10);
+  const methText = 'Every implementation follows the same five-phase pattern. The base timeline is set by the complexity tier. Integration counts and add-ons stack onto Phase 1 transparently. No phase progresses until the prior quality gate is met — that is the discipline that protects your launch.';
+  const methLines = doc.splitTextToSize(methText, PW - 72);
+  doc.text(methLines, 36, y);
+
+  // ============ PAGE 4 — PHASE PLAN ============
+  doc.addPage();
+  drawHeader('Phase-by-phase plan');
+
+  y = 80;
+  setTextRGB(GREEN_DARK);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setCharSpace(3);
+  doc.text('TIMELINE', 36, y);
+  doc.setCharSpace(0);
+  y += 16;
+  setTextRGB(INDIGO);
+  doc.setFontSize(20);
+  doc.setFont('times', 'bold');
+  doc.text('Five phases mapped to your dates', 36, y);
+  doc.setFont('helvetica', 'normal');
+  y += 28;
+
+  const phaseRows = r.phases.map(ph => {
+    const wkLow = Math.round(ph.calDaysLow / 7 * 10) / 10;
+    const wkHigh = Math.round(ph.calDaysHigh / 7 * 10) / 10;
+    const dur = wkLow === wkHigh ? `${wkLow} wk` : `${wkLow}–${wkHigh} wk`;
+    return [
+      `Phase ${ph.num}`,
+      ph.name,
+      fmtDate(ph.startDate),
+      fmtDate(ph.endDate),
+      dur,
+      ph.owner
+    ];
+  });
+
+  doc.autoTable({
+    head: [['#', 'Phase', 'Starts', 'Ends', 'Duration', 'Owner']],
+    body: phaseRows,
+    startY: y,
+    margin: { left: 36, right: 36 },
+    theme: 'plain',
+    styles: { font: 'helvetica', fontSize: 9.5, cellPadding: { top: 8, bottom: 8, left: 8, right: 8 }, lineColor: BORDER, lineWidth: 0.4 },
+    headStyles: { fillColor: INDIGO, textColor: WHITE, fontStyle: 'bold', halign: 'left' },
+    columnStyles: {
+      0: { cellWidth: 50, fontStyle: 'bold', textColor: INDIGO },
+      1: { cellWidth: 130, fontStyle: 'bold', textColor: INDIGO },
+      2: { cellWidth: 80 },
+      3: { cellWidth: 80 },
+      4: { cellWidth: 65, fontStyle: 'bold', textColor: GREEN_DARK },
+      5: { cellWidth: 'auto' }
+    },
+    alternateRowStyles: { fillColor: OFFWHITE }
+  });
+
+  y = doc.lastAutoTable.finalY + 24;
+
+  setTextRGB(GREEN_DARK);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setCharSpace(3);
+  doc.text('PHASE DETAIL', 36, y);
+  doc.setCharSpace(0);
+  y += 18;
+
+  const phaseDetails = phaseDetailContent(state);
+
+  for (const ph of r.phases) {
+    const det = phaseDetails[ph.num];
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    const gateLines = doc.splitTextToSize(det.gate, PW - 220);
+    const gateLineCount = Math.min(gateLines.length, 2);
+    const gateBarH = 12 + gateLineCount * 11;
+    const activityHeight = det.activities.reduce((acc, a) => {
+      const lns = doc.splitTextToSize(a, PW - 120);
+      return acc + 12 * lns.length;
+    }, 0);
+    const blockH = 30 + activityHeight + gateBarH + 14;
+
+    if (y + blockH > PH - 60) {
+      doc.addPage();
+      drawHeader('Phase-by-phase plan (continued)');
+      y = 80;
+    }
+
+    setFillRGB(WHITE);
+    setDrawRGB(BORDER);
+    doc.setLineWidth(0.6);
+    doc.rect(36, y, PW - 72, blockH, 'FD');
+    setFillRGB(GREEN);
+    doc.rect(36, y, 3, blockH, 'F');
+
+    setTextRGB(INDIGO);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.text(`Phase ${ph.num} · ${ph.name}`, 50, y + 18);
+
+    setTextRGB(MUTED);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    const dateLine = `${fmtDate(ph.startDate)}  to  ${fmtDate(ph.endDate)}   ${ph.owner}`;
+    doc.text(dateLine, PW - 50, y + 18, { align: 'right' });
+
+    setTextRGB(BODY);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
+    let ay = y + 38;
+    for (const a of det.activities) {
+      doc.setFillColor(GREEN[0], GREEN[1], GREEN[2]);
+      doc.rect(50, ay - 5, 3, 3, 'F');
+      const lines = doc.splitTextToSize(a, PW - 120);
+      doc.text(lines, 60, ay);
+      ay += 12 * lines.length;
+    }
+
+    const gBarY = y + blockH - gateBarH - 6;
+    setFillRGB(INDIGO);
+    doc.rect(50, gBarY, PW - 100, gateBarH, 'F');
+    setTextRGB(MINT);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setCharSpace(2);
+    doc.text('GATE', 58, gBarY + 14);
+    doc.setCharSpace(0);
+    setTextRGB(INDIGO_PALE);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.text(gateLines.slice(0, 2), 95, gBarY + 14);
+
+    y += blockH + 12;
+  }
+
+  // ============ PAGE — INTEGRATIONS DETAIL (conditional) ============
+  if (r.integrationLines.length > 0) {
+    doc.addPage();
+    drawHeader('Integration effort');
+
+    y = 80;
+    setTextRGB(GREEN_DARK);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setCharSpace(3);
+    doc.text('INTEGRATIONS', 36, y);
+    doc.setCharSpace(0);
+    y += 16;
+    setTextRGB(INDIGO);
+    doc.setFontSize(20);
+    doc.setFont('times', 'bold');
+    doc.text('External systems in scope', 36, y);
+    doc.setFont('helvetica', 'normal');
+    y += 28;
+
+    const intRows = r.integrationLines.map(line => [
+      String(line.count),
+      line.name,
+      `${line.lowDays}–${line.highDays} days`,
+      `${(line.lowDays/5).toFixed(1)}–${(line.highDays/5).toFixed(1)} wk`
+    ]);
+    intRows.push([
+      '',
+      'Total integration effort',
+      `${r.extraDaysLow}–${r.extraDaysHigh} days`,
+      `${(r.extraDaysLow/5).toFixed(1)}–${(r.extraDaysHigh/5).toFixed(1)} wk`
+    ]);
+
+    doc.autoTable({
+      head: [['#', 'Category', 'Effort (working days)', 'Effort (calendar weeks)']],
+      body: intRows,
+      startY: y,
+      margin: { left: 36, right: 36 },
+      theme: 'plain',
+      styles: { font: 'helvetica', fontSize: 10, cellPadding: 8, lineColor: BORDER, lineWidth: 0.4 },
+      headStyles: { fillColor: INDIGO, textColor: WHITE, fontStyle: 'bold' },
+      columnStyles: {
+        0: { cellWidth: 40, fontStyle: 'bold', textColor: INDIGO, halign: 'center' },
+        1: { cellWidth: 'auto', fontStyle: 'bold', textColor: INDIGO },
+        2: { cellWidth: 130, textColor: GREEN_DARK },
+        3: { cellWidth: 130, textColor: GREEN_DARK }
+      },
+      didParseCell: function (data) {
+        if (data.row.index === intRows.length - 1) {
+          data.cell.styles.fillColor = OFFWHITE;
+          data.cell.styles.fontStyle = 'bold';
+        }
+      }
+    });
+
+    y = doc.lastAutoTable.finalY + 24;
+
+    setTextRGB(BODY);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    const intText = 'Integration effort folds into Phase 1. Each integration is scoped at discovery — credentials, sandbox access, schema, and authentication confirmed before build begins.';
+    doc.text(doc.splitTextToSize(intText, PW - 72), 36, y);
+  }
+
+  // ============ PAGE — CLIENT INPUTS & QUALITY GATES ============
+  doc.addPage();
+  drawHeader('Client inputs & quality gates');
+
+  y = 80;
+  setTextRGB(GREEN_DARK);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setCharSpace(3);
+  doc.text('YOUR INPUTS', 36, y);
+  doc.setCharSpace(0);
+  y += 16;
+  setTextRGB(INDIGO);
+  doc.setFontSize(18);
+  doc.setFont('times', 'bold');
+  doc.text("What we'll need from you", 36, y);
+  doc.setFont('helvetica', 'normal');
+  y += 22;
+
+  const inputs = clientInputs(state);
+  const inputRows = inputs.map(i => [i.phase, i.title, i.detail]);
+
+  doc.autoTable({
+    head: [['Phase', 'Input', 'Detail']],
+    body: inputRows,
+    startY: y,
+    margin: { left: 36, right: 36 },
+    theme: 'plain',
+    styles: { font: 'helvetica', fontSize: 9.5, cellPadding: 7, lineColor: BORDER, lineWidth: 0.4 },
+    headStyles: { fillColor: INDIGO, textColor: WHITE, fontStyle: 'bold' },
+    columnStyles: {
+      0: { cellWidth: 60, fontStyle: 'bold', textColor: GREEN_DARK },
+      1: { cellWidth: 150, fontStyle: 'bold', textColor: INDIGO },
+      2: { cellWidth: 'auto', textColor: BODY }
+    },
+    alternateRowStyles: { fillColor: OFFWHITE }
+  });
+
+  y = doc.lastAutoTable.finalY + 30;
+
+  setTextRGB(GREEN_DARK);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setCharSpace(3);
+  doc.text('QUALITY GATES', 36, y);
+  doc.setCharSpace(0);
+  y += 16;
+  setTextRGB(INDIGO);
+  doc.setFontSize(18);
+  doc.setFont('times', 'bold');
+  doc.text('Every phase ends at a gate', 36, y);
+  doc.setFont('helvetica', 'normal');
+  y += 22;
+
+  const gates = phaseDetailContent(state);
+  const gateRows = r.phases.map(ph => [`Phase ${ph.num}`, ph.name, gates[ph.num].gate]);
+
+  doc.autoTable({
+    head: [['Phase', 'Name', 'Gate criteria']],
+    body: gateRows,
+    startY: y,
+    margin: { left: 36, right: 36 },
+    theme: 'plain',
+    styles: { font: 'helvetica', fontSize: 9.5, cellPadding: 7, lineColor: BORDER, lineWidth: 0.4 },
+    headStyles: { fillColor: INDIGO, textColor: WHITE, fontStyle: 'bold' },
+    columnStyles: {
+      0: { cellWidth: 60, fontStyle: 'bold', textColor: GREEN_DARK },
+      1: { cellWidth: 150, fontStyle: 'bold', textColor: INDIGO },
+      2: { cellWidth: 'auto', textColor: BODY }
+    },
+    alternateRowStyles: { fillColor: OFFWHITE }
+  });
+
+  // ============ PAGE — RISKS & ASSUMPTIONS (expanded) ============
+  doc.addPage();
+  drawHeader('Risks, assumptions & notes');
+
+  y = 80;
+  setTextRGB(GREEN_DARK);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setCharSpace(3);
+  doc.text('CRITICAL DEPENDENCIES', 36, y);
+  doc.setCharSpace(0);
+  y += 16;
+  setTextRGB(INDIGO);
+  doc.setFontSize(18);
+  doc.setFont('times', 'bold');
+  doc.text('Things that can shift the timeline', 36, y);
+  doc.setFont('helvetica', 'normal');
+  y += 22;
+
+  const risks = computeRisks(state, r);
+  setTextRGB(BODY);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  for (const risk of risks) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    const lines = doc.splitTextToSize(risk.detail, PW - 100);
+    const lineCount = Math.min(lines.length, 3);
+    const boxH = 22 + lineCount * 11 + 8;
+
+    if (y + boxH > PH - 80) { doc.addPage(); drawHeader('Risks, assumptions & notes (cont.)'); y = 80; }
+
+    setFillRGB(AMBER_BG);
+    setDrawRGB(AMBER);
+    doc.setLineWidth(0.6);
+    doc.rect(36, y, PW - 72, boxH, 'FD');
+    setFillRGB(AMBER);
+    doc.rect(36, y, 3, boxH, 'F');
+
+    setTextRGB(AMBER_TEXT);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text(risk.title, 50, y + 14);
+
+    setTextRGB(BODY);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.text(lines.slice(0, 3), 50, y + 28);
+
+    y += boxH + 10;
+  }
+
+  // Assumptions section (page break if needed)
+  if (y + 140 > PH - 60) { doc.addPage(); drawHeader('Risks, assumptions & notes (cont.)'); y = 80; }
+
+  y += 8;
+  setTextRGB(GREEN_DARK);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setCharSpace(3);
+  doc.text('ASSUMPTIONS', 36, y);
+  doc.setCharSpace(0);
+  y += 16;
+  setTextRGB(INDIGO);
+  doc.setFontSize(14);
+  doc.setFont('times', 'bold');
+  doc.text('Estimates are based on:', 36, y);
+  doc.setFont('helvetica', 'normal');
+  y += 18;
+
+  const assumptions = [
+    'Estimates derived from the WestCX Orchestrate implementation playbook.',
+    `Tier "${r.tier.name}" assumes ${r.tier.devs} WestCX engineer(s) at standard implementation velocity.`,
+    'Integration effort assumes the customer can provide credentials, sandbox access, and an API contact within Phase 1 week 1.',
+    'Phase 0 and Phase 1 can run partly in parallel for tenant bootstrap; sequential dates above are conservative.',
+    'Customer stakeholders are available for kickoff, weekly checkpoints, UAT, and go-live training within the proposed dates.',
+    'Final timeline, scope of work, and pricing are confirmed at scoping discovery.'
+  ];
+  setTextRGB(BODY);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  for (const a of assumptions) {
+    setFillRGB(GREEN);
+    doc.rect(36, y - 4, 3, 3, 'F');
+    const lines = doc.splitTextToSize(a, PW - 80);
+    doc.text(lines, 46, y);
+    y += 14 * lines.length + 4;
+  }
+
+  // ============ FINAL PAGE — LEGAL DISCLAIMER ============
+  doc.addPage();
+  drawHeader('Legal disclaimer');
+
+  y = 80;
+  setTextRGB(GREEN_DARK);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setCharSpace(3);
+  doc.text('LEGAL DISCLAIMER & CONFIDENTIALITY', 36, y);
+  doc.setCharSpace(0);
+  y += 16;
+  setTextRGB(INDIGO);
+  doc.setFontSize(20);
+  doc.setFont('times', 'bold');
+  doc.text('Important notices', 36, y);
+  doc.setFont('helvetica', 'normal');
+  y += 28;
+
+  const disclaimerSections = [
+    {
+      heading: 'Estimates only — not a binding offer',
+      body: 'This project plan is provided for informational and planning purposes only. All estimates — including timelines, effort hours, resource counts, and integration scope — represent good-faith approximations based on the inputs entered into the WestCX Orchestrate LOE Calculator at the time of generation, applied against the WestCX Orchestrate implementation playbook. Actual project scope, duration, sequencing, and resourcing will be confirmed through formal discovery and a written Statement of Work executed between WestCX and the customer.'
+    },
+    {
+      heading: 'Pricing, SLA, and contractual terms',
+      body: 'This document does not constitute a contract, quote, or binding offer. Pricing, payment terms, service-level agreements, data-handling commitments, indemnification, limitations of liability, and compliance certifications are not addressed in this document and will be governed solely by the executed Master Services Agreement, Statement of Work, Data Processing Addendum, and any applicable industry-specific addenda (HIPAA BAA, CJIS Security Addendum, PCI scope letter, etc.).'
+    },
+    {
+      heading: 'Compliance scope',
+      body: 'References to HIPAA, TCPA, SOC 2, CJIS, PCI, or any other regulatory framework reflect WestCX\'s standard implementation patterns and do not represent a certification, attestation, or warranty for the customer\'s specific use case. Customer remains responsible for its own compliance posture; WestCX\'s responsibilities are limited to those expressly defined in the executed agreements.'
+    },
+    {
+      heading: 'Confidentiality',
+      body: 'This document and its contents are confidential and proprietary to WestCX, intended only for the named customer and its authorized personnel. Reproduction, distribution, public posting, or disclosure to any third party without prior written consent from WestCX is prohibited.'
+    },
+    {
+      heading: 'Trademarks',
+      body: 'WestCX, the WestCX logo, Orchestrate, Mosaicx, and Televox are trademarks of West Technology Group, LLC. All other product names, logos, and brands referenced are property of their respective owners and are used for identification purposes only.'
+    }
+  ];
+
+  setTextRGB(BODY);
+  doc.setFontSize(9.5);
+  for (const sec of disclaimerSections) {
+    if (y + 60 > PH - 80) { doc.addPage(); drawHeader('Legal disclaimer (cont.)'); y = 80; }
+    setTextRGB(INDIGO);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text(sec.heading, 36, y);
+    y += 14;
+    setTextRGB(BODY);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
+    const lines = doc.splitTextToSize(sec.body, PW - 72);
+    doc.text(lines, 36, y);
+    y += lines.length * 12 + 12;
+  }
+
+  // Copyright at bottom of legal page
+  if (y + 30 > PH - 80) { doc.addPage(); drawHeader('Legal disclaimer (cont.)'); y = 80; }
+  y += 6;
+  setDrawRGB(BORDER);
+  doc.setLineWidth(0.4);
+  doc.line(36, y, PW - 36, y);
+  y += 16;
+  setTextRGB(MUTED);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  const year = new Date().getFullYear();
+  doc.text(`© ${year} West Technology Group, LLC. All rights reserved.`, 36, y);
+  doc.text('WestCX  ·  Orchestrate  ·  Customer-facing implementation plan', PW - 36, y, { align: 'right' });
+
+  // ============ FINAL FOOTER PASS — page numbers ============
+  const total = doc.getNumberOfPages();
+  for (let p = 2; p <= total; p++) {
+    doc.setPage(p);
+    setFillRGB(WHITE);
+    doc.rect(0, PH - 30, PW, 20, 'F');
+    setTextRGB(MUTED);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Project plan generated by the WestCX Orchestrate LOE calculator  ·  Confidential', 36, PH - 18);
+    doc.text(`Page ${p} of ${total}`, PW - 36, PH - 18, { align: 'right' });
+  }
+
+  const safeName = (state.customerName || 'Project').replace(/[^a-z0-9-_]+/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  doc.save(`Orchestrate-Project-Plan-${safeName}.pdf`);
+}
+
+// =================== HELPERS ===================
+function actionLabel(k) {
+  return ({
+    transfer: 'Transfer',
+    database: 'Database writes',
+    chaining: 'Intent chaining',
+    sms: 'SMS / RCS',
+    stripe: 'Stripe payments',
+    custom: 'Custom actions'
+  })[k] || k;
+}
+
+function addonLabel(k) {
+  return ({
+    extendedHypercare: 'Extended hypercare',
+    failoverMatrix: 'Failover validation',
+    customBranding: 'Custom branding',
+    compliance: 'Compliance assessment'
+  })[k] || k;
+}
+
+function phaseDetailContent(state) {
+  const tCount = state.integrations.telephonyUC + state.integrations.crm + state.integrations.documentedAPI + state.integrations.analysisRequiredAPI;
+
+  const p1Activities = [
+    'Define every intent — caller use case, prompt, examples, confidence threshold.',
+    'Author parameter collection flows with validation, multi-language extraction, ordering.',
+    'Build action chains: database writes, transfers, conditional branching.'
+  ];
+  if (state.actions.sms) p1Activities.push('Set up SMS/RCS messaging actions and 10DLC registration.');
+  if (state.actions.stripe) p1Activities.push('Configure Stripe payment collection with PCI-aware handling.');
+  if (state.actions.custom) p1Activities.push('Implement new custom action types in platform code (~1–2 wks).');
+  if (tCount > 0) p1Activities.push(`Integrate with ${tCount} external system${tCount === 1 ? '' : 's'} — schema review, auth, action mapping, end-to-end testing.`);
+  p1Activities.push('Compose system prompt: voice, boundaries, language behavior, escalation cues.');
+  p1Activities.push('Add static content: greetings, pronunciations, location-specific terms.');
+
+  const p3Activities = [
+    'Provision and configure your production phone number in target area code.',
+    'Wire real transfer destinations into every TRANSFER action.',
+    'Configure analytics dashboard and produce operational runbook.',
+    'Run client training: portal walkthrough, analytics orientation, escalation paths.'
+  ];
+  if (state.addons.failoverMatrix) p3Activities.push('Test full provider-failover matrix (TTS / LLM / telephony / STT).');
+  if (state.addons.compliance) p3Activities.push('Complete compliance assessment (HIPAA / TCPA / SOC 2 / CJIS / PCI scoping).');
+
+  return {
+    0: {
+      activities: [
+        'Provision a dedicated tenant database with the full Orchestrate schema.',
+        'Register your tenant in the master registry with branding and settings.',
+        'Set up the seed-data infrastructure your engagement will use end-to-end.',
+        'Run a smoke test confirming the tenant resolves cleanly on platform startup.'
+      ].concat(state.addons.customBranding ? ['Apply custom branding theming to tenant portal (+3–5 days).'] : []),
+      gate: 'Tenant database is provisioned, registered, and resolving cleanly. Ready for design work to begin.'
+    },
+    1: {
+      activities: p1Activities,
+      gate: 'Every intent classifies correctly. Every parameter flow completes. Every conditional and database action does the right thing.'
+    },
+    2: {
+      activities: [
+        'Generate a scenario library (5+ per intent, per language) for regression coverage.',
+        'Run the evaluation baseline — target 100% green before UAT begins.',
+        'Tune confidence thresholds and few-shot examples based on results.',
+        'Run a live call test on the test number once your testers have signed off.'
+      ],
+      gate: 'Evaluation baseline is green. Client UAT signed off. No P0 issues open.'
+    },
+    3: {
+      activities: p3Activities,
+      gate: 'End-to-end live call succeeds: inbound number, classification, parameter collection, action, transfer or completion, audit log, and analytics dashboard all confirmed.'
+    },
+    4: {
+      activities: [
+        'Monitor classification accuracy, completion rates, and drop-off patterns daily.',
+        'Tune intent thresholds based on real production traffic.',
+        'Triage any issues we find or you flag — seed-data fixes, prompt refinements.',
+        'Send a weekly status report so you always know where you stand.'
+      ].concat(state.addons.extendedHypercare ? ['Extended hypercare: continue monitoring and tuning through week 8.'] : []),
+      gate: 'Two consecutive weeks under 2% misclassification, zero P0 issues, your team confirms the transition to steady-state support.'
+    }
+  };
+}
+
+function clientInputs(state) {
+  const list = [
+    { phase: 'Phase 1', title: 'Caller workflows',     detail: "How today's calls actually flow — step by step, edge cases included." },
+    { phase: 'Phase 1', title: 'Brand assets',          detail: 'Logo, colors, voice and tone guidelines for your tenant.' },
+    { phase: 'Phase 1', title: 'Domain terminology',    detail: 'Names, places, acronyms, pronunciations specific to your operations.' },
+    { phase: 'Phase 1', title: 'Language requirements', detail: `Confirmed support for ${state.languageCount} language${state.languageCount === 1 ? '' : 's'}.` }
+  ];
+  const intCount = Object.values(state.integrations).reduce((a,b)=>a+b,0);
+  if (intCount > 0) {
+    list.push({ phase: 'Phase 1', title: 'Integration contacts', detail: `API owners, sandbox access, and credentials for ${intCount} system${intCount === 1 ? '' : 's'}.` });
+  }
+  if (state.actions.sms) {
+    list.push({ phase: 'Phase 1', title: '10DLC SMS registration', detail: 'TCR brand & campaign details — start in week 1, 2–4 wk lead time.' });
+  }
+  list.push({ phase: 'Phase 2', title: 'UAT testers', detail: '2–3 people who know the workflow, available for 4–8 hours each.' });
+  list.push({ phase: 'Phase 3', title: 'Transfer destinations', detail: 'Real phone numbers for every TRANSFER action your agent will perform.' });
+  list.push({ phase: 'Phase 3', title: 'IT / telecom contact', detail: 'Point of contact for production phone-number provisioning.' });
+  return list;
+}
+
+function computeRisks(state, r) {
+  const risks = [];
+
+  // Risk: SMS / 10DLC
+  if (state.actions.sms) {
+    risks.push({
+      title: '10DLC SMS registration lead time (2–4 weeks)',
+      detail: 'TCR brand and campaign registration must start in Phase 1 week 1 to avoid go-live delay. Government entities may qualify for higher-throughput special use cases. Carrier policy changes (T-Mobile, AT&T, Verizon) can affect approval timelines and throughput.'
+    });
+  }
+  // Risk: undocumented APIs
+  if (state.integrations.analysisRequiredAPI > 0) {
+    risks.push({
+      title: `${state.integrations.analysisRequiredAPI} API${state.integrations.analysisRequiredAPI === 1 ? '' : 's'} requiring discovery analysis`,
+      detail: 'Undocumented or proprietary APIs require reverse-engineering before build. Estimates are conservative; actuals are confirmed at discovery and the timeline may shift if upstream systems change without notice during the engagement.'
+    });
+  }
+  // Risk: telephony coordination
+  if (state.integrations.telephonyUC > 0) {
+    risks.push({
+      title: `${state.integrations.telephonyUC} telephony / UC platform integration${state.integrations.telephonyUC === 1 ? '' : 's'}`,
+      detail: 'Cisco, Genesys, and Avaya integrations require certificate, cluster, and firewall coordination from your IT and security teams. License provisioning and vendor escalation paths can extend lead times. Start credentialing conversations in Phase 1 week 1.'
+    });
+  }
+  // Risk: custom actions
+  if (state.actions.custom) {
+    risks.push({
+      title: 'Custom action types require platform engineering',
+      detail: 'New runtime handlers must be implemented and tested in Orchestrate core (~1–2 weeks). May extend Phase 1 timeline. Subject to platform release cadence and core-team availability.'
+    });
+  }
+  // Risk: compliance
+  if (state.addons.compliance) {
+    risks.push({
+      title: 'Compliance assessment in scope',
+      detail: 'HIPAA / TCPA / SOC 2 / CJIS / PCI scoping adds 1 week to Phase 3 and requires participation from your compliance officer or legal counsel. Industry-specific addenda (BAA, security addendum) are negotiated separately and can extend contract timelines.'
+    });
+  }
+  // Risk: data migration / CRM seeding (when CRM or DB is in scope)
+  if (state.integrations.crm > 0 || state.actions.database) {
+    risks.push({
+      title: 'Data migration & seed data dependencies',
+      detail: 'Bringing in customer records, schedule data, or knowledge content from existing systems requires clean source data, agreed mappings, and a delta-sync strategy. Data-quality issues discovered during Phase 1 can extend authoring time.'
+    });
+  }
+  // Risk: vendor SLA / API rate limits (always when integrations > 0)
+  const intTotal = Object.values(state.integrations).reduce((a,b)=>a+b,0);
+  if (intTotal > 0) {
+    risks.push({
+      title: 'Third-party API SLAs and rate limits',
+      detail: 'External vendor uptime, API rate limits, deprecation cycles, and breaking changes outside WestCX control can affect production throughput and stability. Failover and circuit-breaker patterns are configured in Phase 3 to mitigate where possible.'
+    });
+  }
+  // Risk: data residency / regulated industries
+  risks.push({
+    title: 'Data residency & regulatory framework specificity',
+    detail: 'Healthcare (HIPAA), financial (PCI), public-sector (CJIS, FedRAMP), and regional data-residency obligations vary by customer and use case. Specific controls and audit artifacts are confirmed during discovery and reflected in the executed BAA / DPA / security addendum.'
+  });
+  // Risk: customer change-management readiness (always)
+  risks.push({
+    title: 'Customer change-management readiness',
+    detail: 'Successful go-live depends on operational readiness on the customer side: agent training for new transfer flows, escalation playbook updates, internal communications to staff and end-users, and steady-state ownership for tuning beyond hypercare.'
+  });
+  // Risk: stakeholder availability (always, more prominent for complex)
+  risks.push({
+    title: 'Stakeholder availability for kickoff, UAT, and go-live',
+    detail: 'Phases 1, 2, and 3 each require named customer participants on confirmed dates. Holidays, competing initiatives, vacation, and personnel changes are the most common timeline-shift factors. Lock dates at kickoff.'
+  });
+  // Risk: scope creep (always)
+  risks.push({
+    title: 'Scope drift after kickoff',
+    detail: 'New intents, additional languages, or unforeseen integrations introduced after kickoff are managed via the formal change-control process and may extend the timeline and effort. Estimates above reflect the scope captured at calculator generation.'
+  });
+  // Risk: hypercare-to-steady-state transition (always)
+  risks.push({
+    title: 'Steady-state ownership after hypercare',
+    detail: 'Beyond the 2–4 (or 8) week hypercare window, ongoing tuning, monitoring, and minor seed-data adjustments transition to either WestCX standard support or a customer-side operations owner. Confirm this transition path before go-live.'
+  });
+
+  return risks;
+}
+
+// =================== INIT ===================
+bind();
+render();
+rasterizeLogo();
+</script>
+</body>
+</html>

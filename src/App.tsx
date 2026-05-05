@@ -40,6 +40,7 @@ import { mockRecords } from "@/data/mockData";
 import type {
   AIGuidanceRecord,
   AIRecord,
+  CloudSpendRecord,
   DashboardRecord,
   FilterState,
   ImplementationFilterState,
@@ -61,15 +62,16 @@ import {
   PLATFORM_ORDER,
 } from "@/utils/dashboardData";
 import { exportRecordsAsCsv, exportTableAsCsv, parseDataFiles } from "@/utils/csv";
-import { formatCompactCurrency, formatCompactNumber, formatCurrency } from "@/utils/formatters";
+import { formatCompactCurrency, formatCompactNumber, formatCurrency, formatMonth } from "@/utils/formatters";
 
-type PageKey = "home" | "command" | "implementation" | "product" | "ai" | "ora";
+type PageKey = "home" | "command" | "implementation" | "product" | "ai" | "ora" | "cloud" | "loe";
 type PersistedUploadState = {
   records: DashboardRecord[];
   implementationRecords: ImplementationRecord[];
   productRecords: ProductRecord[];
   aiRecords: AIRecord[];
   aiGuidanceRecords: AIGuidanceRecord[];
+  cloudSpendRecords: CloudSpendRecord[];
   issues: UploadIssue[];
   sources: string[];
   lastRefreshIso: string;
@@ -162,6 +164,9 @@ export default function App() {
   );
   const [aiGuidanceRecords, setAIGuidanceRecords] = useState<AIGuidanceRecord[]>(
     () => persistedUpload?.aiGuidanceRecords ?? [],
+  );
+  const [cloudSpendRecords, setCloudSpendRecords] = useState<CloudSpendRecord[]>(
+    () => persistedUpload?.cloudSpendRecords ?? [],
   );
   const [filters, setFilters] = useState<FilterState>(() => buildInitialFilters(seededRecords));
   const [implementationFilters, setImplementationFilters] = useState<ImplementationFilterState>(emptyImplementationFilters);
@@ -303,6 +308,21 @@ export default function App() {
     };
   }, [aiRecords]);
 
+  const cloudStats = useMemo(() => {
+    const months = Array.from(new Set(cloudSpendRecords.map((record) => record.month).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+    const currentMonth = months.at(-1) ?? "";
+    const previousMonth = months.length > 1 ? months.at(-2) ?? "" : "";
+    const currentTotal = cloudSpendRecords
+      .filter((record) => record.month === currentMonth)
+      .reduce((acc, record) => acc + record.cost, 0);
+    const previousTotal = cloudSpendRecords
+      .filter((record) => record.month === previousMonth)
+      .reduce((acc, record) => acc + record.cost, 0);
+    const delta = currentTotal - previousTotal;
+
+    return { currentMonth, previousMonth, currentTotal, previousTotal, delta };
+  }, [cloudSpendRecords]);
+
   const searchResults = useMemo(() => {
     if (!searchQuery.trim()) {
       return [];
@@ -314,6 +334,8 @@ export default function App() {
       { label: "Product Commercialization Dashboard", page: "product" as PageKey, hint: "Commercial pipeline and launch status" },
       { label: "AI Adoption", page: "ai" as PageKey, hint: "Licenses and adoption by AI tool" },
       { label: "Orchestrate ORA", page: "ora" as PageKey, hint: "Embedded Orchestrate ORA workspace" },
+      { label: "Cloud Analyzer", page: "cloud" as PageKey, hint: "Current vs last month cloud spend analysis" },
+      { label: "LOE Calculator", page: "loe" as PageKey, hint: "Embedded implementation level-of-effort calculator" },
       ...filteredImplementationRecords.slice(0, 3).map((record) => ({
         label: `${record.client_name} • ${record.product_name}`,
         page: "implementation" as PageKey,
@@ -328,6 +350,11 @@ export default function App() {
         label: record.ai_tool,
         page: "ai" as PageKey,
         hint: `${record.date} • ${record.users ?? 0} licenses`,
+      })),
+      ...cloudSpendRecords.slice(0, 3).map((record) => ({
+        label: `${record.provider} • ${record.service}`,
+        page: "cloud" as PageKey,
+        hint: `${record.month} • ${formatCurrency(record.cost)}`,
       })),
     ];
 
@@ -359,6 +386,7 @@ export default function App() {
     setProductRecords(parsed.productRecords);
     setAIRecords(parsed.aiRecords);
     setAIGuidanceRecords(parsed.aiGuidanceRecords);
+    setCloudSpendRecords(parsed.cloudSpendRecords);
     setSourceNames(parsed.sources.length ? parsed.sources : ["WestCX_Main_Data.xlsx"]);
     setIssues(parsed.issues);
     setLastRefresh(nextRefresh);
@@ -368,6 +396,7 @@ export default function App() {
       productRecords: parsed.productRecords,
       aiRecords: parsed.aiRecords,
       aiGuidanceRecords: parsed.aiGuidanceRecords,
+      cloudSpendRecords: parsed.cloudSpendRecords,
       issues: parsed.issues,
       sources: parsed.sources.length ? parsed.sources : ["WestCX_Main_Data.xlsx"],
       lastRefreshIso: nextRefresh.toISOString(),
@@ -421,6 +450,8 @@ export default function App() {
       product: "Product Commercialization Dashboard",
       ai: "AI Adoption",
       ora: "Orchestrate ORA",
+      cloud: "Cloud Analyzer",
+      loe: "LOE Calculator",
     };
     return `Home → ${names[activePage]}`;
   }, [activePage]);
@@ -487,17 +518,49 @@ export default function App() {
               </section>
             ) : null}
 
-                {activePage === "ai" ? (
-                  <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                    <KpiCard label="AI Tools" value={String(aiStats.uniqueTools)} accent="orchestrate" />
-                    <KpiCard label="Latest Licenses" value={String(aiStats.latestLicenses)} accent="hcpro" />
-                    <KpiCard label="Avg Adoption" value={`${aiStats.averageAdoption}%`} accent="engage" />
-                  </section>
-                ) : null}
+            {activePage === "ai" ? (
+              <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                <KpiCard label="AI Tools" value={String(aiStats.uniqueTools)} accent="orchestrate" />
+                <KpiCard label="Latest Licenses" value={String(aiStats.latestLicenses)} accent="hcpro" />
+                <KpiCard label="Avg Adoption" value={`${aiStats.averageAdoption}%`} accent="engage" />
+              </section>
+            ) : null}
+
+            {activePage === "cloud" ? (
+              <section className="mb-6 grid gap-4 md:grid-cols-3">
+                <KpiCard
+                  label={`Current Month${cloudStats.currentMonth ? ` • ${formatMonth(cloudStats.currentMonth)}` : ""}`}
+                  value={formatCompactCurrency(cloudStats.currentTotal)}
+                  accent="orchestrate"
+                />
+                <KpiCard
+                  label={`Last Month${cloudStats.previousMonth ? ` • ${formatMonth(cloudStats.previousMonth)}` : ""}`}
+                  value={formatCompactCurrency(cloudStats.previousTotal)}
+                  accent="hcpro"
+                />
+                <KpiCard
+                  label="Month-over-Month Delta"
+                  value={formatCompactCurrency(cloudStats.delta)}
+                  accent={cloudStats.delta >= 0 ? "engage" : "hcpro"}
+                />
+              </section>
+            ) : null}
 
             {activePage === "ora" ? (
               <main className="space-y-6">
                 <OraPage onBackHome={() => setActivePage("home")} />
+              </main>
+            ) : null}
+
+            {activePage === "loe" ? (
+              <main className="space-y-6">
+                <LoeCalculatorPage onBackHome={() => setActivePage("home")} />
+              </main>
+            ) : null}
+
+            {activePage === "cloud" ? (
+              <main className="space-y-6">
+                <CloudAnalyzerPage records={cloudSpendRecords} onBackHome={() => setActivePage("home")} />
               </main>
             ) : null}
 
@@ -692,7 +755,7 @@ function HomePage({
           Strategic operating portal for command, delivery, and commercialization visibility.
         </h1>
         <p className="mt-4 max-w-3xl text-base text-[#a7b8d8]">
-          Navigate between the live CIO command center, implementation execution portfolio, product commercialization console, and AI adoption dashboard while keeping a single connected workbook source of truth.
+          Navigate between the live CIO command center, implementation execution portfolio, product commercialization console, AI adoption workspace, and embedded operating modules while keeping a single connected workbook source of truth.
         </p>
       </section>
 
@@ -732,13 +795,27 @@ function HomePage({
           onClick={() => onNavigate("ora")}
           icon={<PortalGlyph tone="blue" kind="ora" />}
         />
+        <PortalCard
+          title="Cloud Analyzer"
+          description="Current month vs last month cloud cost analysis across every workbook tab that starts with `Cloud-`."
+          accent="from-[#22c55e]/25 to-[#22c55e]/5"
+          onClick={() => onNavigate("cloud")}
+          icon={<PortalGlyph tone="green" kind="cloud" />}
+        />
+        <PortalCard
+          title="LOE Calculator"
+          description="Embedded Orchestrate implementation LOE calculator with one-click return to the CIO dashboard home."
+          accent="from-[#a855f7]/25 to-[#a855f7]/5"
+          onClick={() => onNavigate("loe")}
+          icon={<PortalGlyph tone="purple" kind="loe" />}
+        />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
         <UploadDropzone loading={loading} onFilesSelected={onFilesSelected} />
         <SectionCard
           title="Portal Controls"
-          subtitle="Use a single Excel workbook or CSV set to populate all four dashboards."
+          subtitle="Use a single Excel workbook or CSV set to populate all six dashboards."
           action={
             <button
               type="button"
@@ -1596,6 +1673,209 @@ function OraPage({ onBackHome }: { onBackHome: () => void }) {
   );
 }
 
+function LoeCalculatorPage({ onBackHome }: { onBackHome: () => void }) {
+  return (
+    <>
+      <PageTopActions onBackHome={onBackHome} />
+      <SectionCard
+        title="LOE Calculator"
+        subtitle="Embedded Orchestrate level-of-effort calculator for sizing implementation workstreams and returning cleanly to the CIO dashboard."
+        action={
+          <a
+            href="/loe-calculator.html"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 rounded-full border border-[#a855f7]/30 bg-[#a855f7]/10 px-4 py-2 text-sm text-white"
+          >
+            Open In New Tab
+          </a>
+        }
+      >
+        <div className="overflow-hidden rounded-[1.9rem] border border-white/10 bg-white">
+          <iframe
+            src="/loe-calculator.html"
+            title="LOE Calculator"
+            className="h-[84vh] min-h-[860px] w-full bg-white"
+          />
+        </div>
+      </SectionCard>
+    </>
+  );
+}
+
+function CloudAnalyzerPage({
+  records,
+  onBackHome,
+}: {
+  records: CloudSpendRecord[];
+  onBackHome: () => void;
+}) {
+  const months = Array.from(new Set(records.map((record) => record.month).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  const currentMonth = months.at(-1) ?? "";
+  const previousMonth = months.length > 1 ? months.at(-2) ?? "" : "";
+  const currentLabel = currentMonth ? formatMonth(currentMonth) : "Current Month";
+  const previousLabel = previousMonth ? formatMonth(previousMonth) : "Previous Month";
+
+  const byProvider = Array.from(
+    records.reduce((acc, record) => {
+      const existing = acc.get(record.provider) ?? { provider: record.provider, current: 0, previous: 0 };
+      if (record.month === currentMonth) {
+        existing.current += record.cost;
+      }
+      if (record.month === previousMonth) {
+        existing.previous += record.cost;
+      }
+      acc.set(record.provider, existing);
+      return acc;
+    }, new Map<string, { provider: string; current: number; previous: number }>()),
+  )
+    .map(([, value]) => ({ ...value, delta: value.current - value.previous }))
+    .sort((a, b) => b.current - a.current);
+
+  const providerChartData = byProvider.map((item) => ({
+    provider: item.provider,
+    [currentLabel]: item.current,
+    [previousLabel]: item.previous,
+  }));
+
+  const serviceMovers = Array.from(
+    records.reduce((acc, record) => {
+      const key = `${record.provider}:::${record.service}`;
+      const existing = acc.get(key) ?? { provider: record.provider, service: record.service, current: 0, previous: 0 };
+      if (record.month === currentMonth) {
+        existing.current += record.cost;
+      }
+      if (record.month === previousMonth) {
+        existing.previous += record.cost;
+      }
+      acc.set(key, existing);
+      return acc;
+    }, new Map<string, { provider: string; service: string; current: number; previous: number }>()),
+  )
+    .map(([, value]) => ({ ...value, delta: value.current - value.previous }))
+    .filter((item) => item.current !== 0 || item.previous !== 0)
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+  const topIncrease = serviceMovers.find((item) => item.delta > 0) ?? null;
+  const topDecrease = serviceMovers.find((item) => item.delta < 0) ?? null;
+
+  if (!records.length) {
+    return (
+      <>
+        <PageTopActions onBackHome={onBackHome} />
+        <SectionCard
+          title="Cloud Analyzer"
+          subtitle="Upload a workbook with tabs that start with `Cloud-` to analyze monthly spend by provider and service."
+        >
+          <div className="rounded-[1.75rem] border border-dashed border-white/10 bg-white/[0.03] px-6 py-12 text-center text-muted">
+            No Cloud-* data is loaded yet.
+          </div>
+        </SectionCard>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <PageTopActions onBackHome={onBackHome} />
+      <SectionCard
+        title="Cloud Analyzer"
+        subtitle={`Current month vs last month cost analysis across ${byProvider.length} cloud provider tabs.`}
+      >
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <InsightCard icon={<BadgeDollarSign className="h-5 w-5 text-[#41b6ff]" />} label={`Current Month • ${currentLabel}`} value={formatCurrency(byProvider.reduce((acc, item) => acc + item.current, 0))} />
+          <InsightCard icon={<BadgeDollarSign className="h-5 w-5 text-[#3be7b0]" />} label={`Last Month • ${previousLabel}`} value={formatCurrency(byProvider.reduce((acc, item) => acc + item.previous, 0))} />
+          <InsightCard icon={<Signal className="h-5 w-5 text-[#f59e0b]" />} label="Top Increase Driver" value={topIncrease ? `${topIncrease.provider}: ${formatCompactCurrency(topIncrease.delta)}` : "N/A"} />
+          <InsightCard icon={<ShieldAlert className="h-5 w-5 text-[#f43f5e]" />} label="Top Decrease Driver" value={topDecrease ? `${topDecrease.provider}: ${formatCompactCurrency(Math.abs(topDecrease.delta))}` : "N/A"} />
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Spend Breakdown Per Cloud"
+        subtitle={`Grouped comparison of ${currentLabel} vs ${previousLabel} across every Cloud-* tab.`}
+      >
+        <div className="h-[380px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={providerChartData} margin={{ top: 12, right: 16, left: 0, bottom: 0 }}>
+              <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="provider" tick={{ fill: "#8ba0c7", fontSize: 12 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: "#8ba0c7", fontSize: 12 }} axisLine={false} tickLine={false} tickFormatter={(value) => formatCompactCurrency(Number(value))} />
+              <Tooltip formatter={(value: number) => [formatCurrency(value), "Spend"]} />
+              <Legend />
+              <Bar dataKey={currentLabel} fill="#41b6ff" radius={[10, 10, 0, 0]} />
+              <Bar dataKey={previousLabel} fill="#8b5cf6" radius={[10, 10, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Provider Cost Movement"
+        subtitle="Detection of provider-level increases and decreases between the current and previous month."
+      >
+        <div className="overflow-x-auto">
+          <table className="min-w-full border-separate border-spacing-0">
+            <thead>
+              <tr>
+                <th className="px-4 py-3 text-left text-xs uppercase tracking-[0.2em] text-[#8fd6ff]">Provider</th>
+                <th className="px-4 py-3 text-left text-xs uppercase tracking-[0.2em] text-[#8fd6ff]">{currentLabel}</th>
+                <th className="px-4 py-3 text-left text-xs uppercase tracking-[0.2em] text-[#8fd6ff]">{previousLabel}</th>
+                <th className="px-4 py-3 text-left text-xs uppercase tracking-[0.2em] text-[#8fd6ff]">Delta</th>
+                <th className="px-4 py-3 text-left text-xs uppercase tracking-[0.2em] text-[#8fd6ff]">Direction</th>
+              </tr>
+            </thead>
+            <tbody>
+              {byProvider.map((item) => (
+                <tr key={item.provider} className="transition hover:bg-white/[0.04]">
+                  <td className="border-t border-white/8 px-4 py-3 text-white">{item.provider}</td>
+                  <td className="border-t border-white/8 px-4 py-3 text-[#d8e6ff]">{formatCurrency(item.current)}</td>
+                  <td className="border-t border-white/8 px-4 py-3 text-[#d8e6ff]">{formatCurrency(item.previous)}</td>
+                  <td className={`border-t border-white/8 px-4 py-3 ${item.delta >= 0 ? "text-[#3be7b0]" : "text-[#f43f5e]"}`}>
+                    {item.delta >= 0 ? "+" : "-"}{formatCurrency(Math.abs(item.delta))}
+                  </td>
+                  <td className="border-t border-white/8 px-4 py-3 text-muted">{item.delta >= 0 ? "Increase" : "Decrease"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Service Movers"
+        subtitle="Largest service-level changes detected across all Cloud-* tabs."
+      >
+        <div className="overflow-x-auto">
+          <table className="min-w-full border-separate border-spacing-0">
+            <thead>
+              <tr>
+                <th className="px-4 py-3 text-left text-xs uppercase tracking-[0.2em] text-[#8fd6ff]">Provider</th>
+                <th className="px-4 py-3 text-left text-xs uppercase tracking-[0.2em] text-[#8fd6ff]">Service</th>
+                <th className="px-4 py-3 text-left text-xs uppercase tracking-[0.2em] text-[#8fd6ff]">{currentLabel}</th>
+                <th className="px-4 py-3 text-left text-xs uppercase tracking-[0.2em] text-[#8fd6ff]">{previousLabel}</th>
+                <th className="px-4 py-3 text-left text-xs uppercase tracking-[0.2em] text-[#8fd6ff]">Delta</th>
+              </tr>
+            </thead>
+            <tbody>
+              {serviceMovers.slice(0, 20).map((item, index) => (
+                <tr key={`${item.provider}-${item.service}-${index}`} className="transition hover:bg-white/[0.04]">
+                  <td className="border-t border-white/8 px-4 py-3 text-white">{item.provider}</td>
+                  <td className="border-t border-white/8 px-4 py-3 text-[#d8e6ff]">{item.service}</td>
+                  <td className="border-t border-white/8 px-4 py-3 text-[#d8e6ff]">{formatCurrency(item.current)}</td>
+                  <td className="border-t border-white/8 px-4 py-3 text-[#d8e6ff]">{formatCurrency(item.previous)}</td>
+                  <td className={`border-t border-white/8 px-4 py-3 ${item.delta >= 0 ? "text-[#3be7b0]" : "text-[#f43f5e]"}`}>
+                    {item.delta >= 0 ? "+" : "-"}{formatCurrency(Math.abs(item.delta))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </SectionCard>
+    </>
+  );
+}
+
 function DataSourceBadge({ sourceNames, lastRefresh }: { sourceNames: string[]; lastRefresh: Date }) {
   return (
     <div className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2">
@@ -2094,7 +2374,7 @@ function PortalGlyph({
   kind,
 }: {
   tone: "blue" | "green" | "purple" | "amber";
-  kind: "command" | "implementation" | "product" | "ai" | "ora";
+  kind: "command" | "implementation" | "product" | "ai" | "ora" | "cloud" | "loe";
 }) {
   const toneClasses = {
     blue: {
@@ -2137,6 +2417,8 @@ function PortalGlyph({
         {kind === "product" ? <ProductGlyph /> : null}
         {kind === "ai" ? <AIGlyph /> : null}
         {kind === "ora" ? <OraGlyph /> : null}
+        {kind === "cloud" ? <CloudGlyph /> : null}
+        {kind === "loe" ? <LoeGlyph /> : null}
       </div>
     </div>
   );
@@ -2182,6 +2464,20 @@ function AIGlyph() {
   );
 }
 
+function LoeGlyph() {
+  return (
+    <div className="relative h-12 w-12">
+      <div className="absolute inset-x-3 top-2 h-8 rounded-xl border-2 border-current bg-current/10" />
+      <div className="absolute left-5 top-0 h-2 w-2 rounded-full bg-current shadow-[0_0_14px_currentColor]" />
+      <div className="absolute left-6 top-2 h-5 w-[2px] bg-current/80" />
+      <div className="absolute left-4 top-5 h-[2px] w-6 bg-current/80" />
+      <div className="absolute left-4 top-5 h-2 w-2 rounded-full bg-current" />
+      <div className="absolute left-8 top-5 h-2 w-2 rounded-full bg-current" />
+      <div className="absolute left-[22px] top-8 h-2 w-2 rounded-full bg-current" />
+    </div>
+  );
+}
+
 function OraGlyph() {
   return (
     <div className="relative h-12 w-12">
@@ -2191,6 +2487,20 @@ function OraGlyph() {
       <div className="absolute left-1 top-1/2 h-[2px] w-10 -translate-y-1/2 bg-current/70" />
       <div className="absolute left-1/2 top-1 h-10 w-[2px] -translate-x-1/2 bg-current/70" />
       <div className="absolute right-1 top-1 h-2.5 w-2.5 rounded-full border border-current bg-current/15" />
+    </div>
+  );
+}
+
+function CloudGlyph() {
+  return (
+    <div className="relative h-12 w-12">
+      <div className="absolute inset-x-2 top-3 h-5 rounded-full border-2 border-current/80 bg-current/10" />
+      <div className="absolute left-1 top-5 h-4 w-5 rounded-full border-2 border-current/80 bg-current/10" />
+      <div className="absolute right-1 top-5 h-4 w-5 rounded-full border-2 border-current/80 bg-current/10" />
+      <div className="absolute left-3 right-3 top-7 h-3 rounded-full bg-current/15" />
+      <div className="absolute left-5 top-9 h-3 w-1 rounded-full bg-current" />
+      <div className="absolute left-8 top-9 h-3 w-1 rounded-full bg-current/80" />
+      <div className="absolute left-11 top-9 h-3 w-1 rounded-full bg-current/60" />
     </div>
   );
 }

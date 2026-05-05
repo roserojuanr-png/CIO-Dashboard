@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import type {
   AIGuidanceRecord,
   AIRecord,
+  CloudSpendRecord,
   DashboardRecord,
   ImplementationRecord,
   MetricKey,
@@ -18,6 +19,11 @@ type HeaderDetection = {
   rows: RawRow[];
   headerRowIndex: number;
 } | null;
+
+type CloudSheetParseResult = {
+  records: CloudSpendRecord[];
+  issues: UploadIssue[];
+};
 
 const FIELD_ALIASES: Record<string, string[]> = {
   date: ["date", "month", "period", "month_date", "month_start"],
@@ -198,6 +204,10 @@ function buildRowsFromHeaderMatrix(matrix: unknown[][], headerRowIndex: number):
 
 function getHeaderLookupKey(key: string): string {
   return normalizeKey(key.replace(/__\d+$/, ""));
+}
+
+function trimNormalizedKey(value: string): string {
+  return normalizeKey(value).replace(/^_+|_+$/g, "");
 }
 
 function scoreHeaderCandidate(headers: string[]): number {
@@ -576,6 +586,135 @@ function parseAIGuidanceRow(row: RawRow, source: string, sourceSheet: string): A
   };
 }
 
+function isCloudTotalHeader(header: string): boolean {
+  const normalized = normalizeKey(header);
+  return normalized === "total" || normalized === "total_usd" || normalized === "total_costs" || normalized === "total_cost";
+}
+
+function parseCloudLongFormat(
+  rows: RawRow[],
+  provider: string,
+  source: string,
+  sourceSheet: string,
+  costHeaderTargets: string[] = ["costusd", "subtotal"],
+): CloudSpendRecord[] {
+  if (!rows.length) {
+    return [];
+  }
+
+  const dateKey = Object.keys(rows[0]).find((key) => ["date", "usagedate", "date_utc"].includes(getHeaderLookupKey(key)));
+  const serviceKey = Object.keys(rows[0]).find((key) =>
+    ["servicename", "service_description", "service"].includes(getHeaderLookupKey(key)),
+  );
+  const costKey = Object.keys(rows[0]).find((key) =>
+    costHeaderTargets.includes(getHeaderLookupKey(key))
+  );
+
+  if (!dateKey || !serviceKey || !costKey) {
+    return [];
+  }
+
+  const records: CloudSpendRecord[] = [];
+
+  rows.forEach((row) => {
+      const date = normalizeDateText(row[dateKey]);
+      const month = getMonthKey(date || String(row[dateKey] ?? ""));
+      const service = String(row[serviceKey] ?? "").trim();
+      const cost = parseNumber(row[costKey]);
+      if (!month || !date || !service || cost === null) {
+        return;
+      }
+      records.push({ provider, service, date, month, cost, source, sourceSheet });
+    });
+
+  return records;
+}
+
+function parseCloudWideFormat(
+  matrix: unknown[][],
+  provider: string,
+  source: string,
+  sourceSheet: string,
+  serviceHeaderPattern?: RegExp,
+): CloudSpendRecord[] {
+  const headerRow = (matrix[0] ?? []).map((cell) => String(cell ?? "").trim());
+  const firstHeader = headerRow[0] ?? "";
+  const normalizedFirstHeader = trimNormalizedKey(firstHeader);
+  if (!["date_utc", "date", "service"].includes(normalizedFirstHeader)) {
+    return [];
+  }
+
+  const records: CloudSpendRecord[] = [];
+  const serviceHeaders = headerRow.slice(1).map((header) => String(header ?? "").trim());
+
+  for (const row of matrix.slice(1)) {
+    const rowDateRaw = String(row?.[0] ?? "").trim();
+    const date = normalizeDateText(rowDateRaw);
+    const month = getMonthKey(date || rowDateRaw);
+    if (!month || !date) {
+      continue;
+    }
+
+    serviceHeaders.forEach((header, index) => {
+      if (!header || isCloudTotalHeader(header)) {
+        return;
+      }
+      if (serviceHeaderPattern && !serviceHeaderPattern.test(header)) {
+        return;
+      }
+      const cost = parseNumber(row?.[index + 1]);
+      if (cost === null) {
+        return;
+      }
+      records.push({
+        provider,
+        service: header.replace(/\(\$|USD\)|\(\$?\)|\(USD\)/g, "").trim(),
+        date,
+        month,
+        cost,
+        source,
+        sourceSheet,
+      });
+    });
+  }
+
+  return records;
+}
+
+function parseCloudSheet(
+  matrix: unknown[][],
+  source: string,
+  sourceSheet: string,
+): CloudSheetParseResult {
+  const provider = sourceSheet.replace(/^Cloud-/, "").trim() || sourceSheet;
+  const normalizedCloudSheet = normalizeKey(sourceSheet);
+  const issues: UploadIssue[] = [];
+  const headerRowIndex = matrix.findIndex((row) => (row ?? []).some((cell) => String(cell ?? "").trim() !== ""));
+  const longRows = headerRowIndex >= 0 ? buildRowsFromHeaderMatrix(matrix, headerRowIndex) : [];
+  let records: CloudSpendRecord[] = [];
+
+  if (normalizedCloudSheet === "cloud_oci") {
+    records = parseCloudWideFormat(matrix, provider, source, sourceSheet, /\(USD\)/);
+  } else if (normalizedCloudSheet === "cloud_azure" || normalizedCloudSheet === "cloud_azure_corp") {
+    records = parseCloudLongFormat(longRows, provider, source, sourceSheet, ["costusd"]);
+  } else {
+    records = parseCloudLongFormat(longRows, provider, source, sourceSheet, ["costusd", "subtotal"]);
+    if (!records.length) {
+      records = parseCloudWideFormat(matrix, provider, source, sourceSheet);
+    }
+  }
+
+  if (!records.length) {
+    issues.push({
+      fileName: source,
+      level: "warning",
+      message: `${sourceSheet}: no cloud spend rows were parsed from this Cloud-* tab.`,
+    });
+  }
+
+  return { records, issues };
+}
+
 function isImplementationSheet(rows: RawRow[]): boolean {
   if (!rows.length) {
     return false;
@@ -616,7 +755,7 @@ function parseRows(rows: RawRow[], source: string, sourceSheet = "Sheet1"): Pars
   const issues: UploadIssue[] = [];
   if (!rows.length) {
     issues.push({ fileName: source, level: "warning", message: `${sourceSheet}: no data rows found.` });
-    return { records: [], implementationRecords: [], productRecords: [], aiRecords: [], aiGuidanceRecords: [], issues, sources: [source] };
+    return { records: [], implementationRecords: [], productRecords: [], aiRecords: [], aiGuidanceRecords: [], cloudSpendRecords: [], issues, sources: [source] };
   }
 
   if (isImplementationSheet(rows)) {
@@ -633,7 +772,7 @@ function parseRows(rows: RawRow[], source: string, sourceSheet = "Sheet1"): Pars
       });
     }
 
-    return { records: [], implementationRecords, productRecords: [], aiRecords: [], aiGuidanceRecords: [], issues, sources: [source] };
+    return { records: [], implementationRecords, productRecords: [], aiRecords: [], aiGuidanceRecords: [], cloudSpendRecords: [], issues, sources: [source] };
   }
 
   if (isProductSheet(rows)) {
@@ -650,7 +789,7 @@ function parseRows(rows: RawRow[], source: string, sourceSheet = "Sheet1"): Pars
       });
     }
 
-    return { records: [], implementationRecords: [], productRecords, aiRecords: [], aiGuidanceRecords: [], issues, sources: [source] };
+    return { records: [], implementationRecords: [], productRecords, aiRecords: [], aiGuidanceRecords: [], cloudSpendRecords: [], issues, sources: [source] };
   }
 
   if (isAISheet(rows)) {
@@ -667,7 +806,7 @@ function parseRows(rows: RawRow[], source: string, sourceSheet = "Sheet1"): Pars
       });
     }
 
-    return { records: [], implementationRecords: [], productRecords: [], aiRecords, aiGuidanceRecords: [], issues, sources: [source] };
+    return { records: [], implementationRecords: [], productRecords: [], aiRecords, aiGuidanceRecords: [], cloudSpendRecords: [], issues, sources: [source] };
   }
 
   if (isAIGuidanceSheet(rows)) {
@@ -684,7 +823,7 @@ function parseRows(rows: RawRow[], source: string, sourceSheet = "Sheet1"): Pars
       });
     }
 
-    return { records: [], implementationRecords: [], productRecords: [], aiRecords: [], aiGuidanceRecords, issues, sources: [source] };
+    return { records: [], implementationRecords: [], productRecords: [], aiRecords: [], aiGuidanceRecords, cloudSpendRecords: [], issues, sources: [source] };
   }
 
   const firstRow = rows[0];
@@ -699,7 +838,7 @@ function parseRows(rows: RawRow[], source: string, sourceSheet = "Sheet1"): Pars
       level: "error",
       message: `${sourceSheet}: missing required column(s): ${missingFields.join(", ")}.`,
     });
-    return { records: [], implementationRecords: [], productRecords: [], aiRecords: [], aiGuidanceRecords: [], issues, sources: [source] };
+    return { records: [], implementationRecords: [], productRecords: [], aiRecords: [], aiGuidanceRecords: [], cloudSpendRecords: [], issues, sources: [source] };
   }
 
   const records = rows
@@ -715,7 +854,7 @@ function parseRows(rows: RawRow[], source: string, sourceSheet = "Sheet1"): Pars
     });
   }
 
-  return { records, implementationRecords: [], productRecords: [], aiRecords: [], aiGuidanceRecords: [], issues, sources: [source] };
+  return { records, implementationRecords: [], productRecords: [], aiRecords: [], aiGuidanceRecords: [], cloudSpendRecords: [], issues, sources: [source] };
 }
 
 function parseCsvText(text: string): RawRow[] {
@@ -738,6 +877,7 @@ async function parseCsvFile(file: File): Promise<ParseResult> {
       productRecords: [],
       aiRecords: [],
       aiGuidanceRecords: [],
+      cloudSpendRecords: [],
       issues: [{ fileName: file.name, level: "warning", message: "File is empty and was skipped." }],
       sources: [file.name],
     };
@@ -753,6 +893,7 @@ async function parseWorkbookFile(file: File): Promise<ParseResult> {
   const productRecords: ProductRecord[] = [];
   const aiRecords: AIRecord[] = [];
   const aiGuidanceRecords: AIGuidanceRecord[] = [];
+  const cloudSpendRecords: CloudSpendRecord[] = [];
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
   const normalizedSheetNames = new Map(
@@ -776,6 +917,14 @@ async function parseWorkbookFile(file: File): Promise<ParseResult> {
       defval: "",
       raw: false,
     }) as unknown[][];
+
+    if (normalizedSheetName.startsWith("cloud_")) {
+      const parsedCloud = parseCloudSheet(matrix, file.name, sheetName);
+      cloudSpendRecords.push(...parsedCloud.records);
+      issues.push(...parsedCloud.issues);
+      continue;
+    }
+
     const detected = detectWorkbookHeaderRows(matrix);
 
     if (!detected) {
@@ -788,6 +937,7 @@ async function parseWorkbookFile(file: File): Promise<ParseResult> {
     productRecords.push(...parsed.productRecords);
     aiRecords.push(...parsed.aiRecords);
     aiGuidanceRecords.push(...parsed.aiGuidanceRecords);
+    cloudSpendRecords.push(...parsed.cloudSpendRecords);
     issues.push(...parsed.issues);
   }
 
@@ -795,7 +945,7 @@ async function parseWorkbookFile(file: File): Promise<ParseResult> {
     issues.push({ fileName: file.name, level: "warning", message: "Workbook contains no sheets." });
   }
 
-  return { records, implementationRecords, productRecords, aiRecords, aiGuidanceRecords, issues, sources: [file.name] };
+  return { records, implementationRecords, productRecords, aiRecords, aiGuidanceRecords, cloudSpendRecords, issues, sources: [file.name] };
 }
 
 export async function parseDataFiles(files: File[]): Promise<ParseResult> {
@@ -815,9 +965,10 @@ export async function parseDataFiles(files: File[]): Promise<ParseResult> {
   const productRecords = results.flatMap((result) => result.productRecords);
   const aiRecords = results.flatMap((result) => result.aiRecords);
   const aiGuidanceRecords = results.flatMap((result) => result.aiGuidanceRecords);
+  const cloudSpendRecords = results.flatMap((result) => result.cloudSpendRecords);
   const sources = Array.from(new Set(results.flatMap((result) => result.sources)));
 
-  return { records, implementationRecords, productRecords, aiRecords, aiGuidanceRecords, issues, sources };
+  return { records, implementationRecords, productRecords, aiRecords, aiGuidanceRecords, cloudSpendRecords, issues, sources };
 }
 
 export function exportRecordsAsCsv(records: DashboardRecord[]): void {
